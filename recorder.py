@@ -1,6 +1,8 @@
 import json
 import time
 import os
+import shutil
+import stat
 import pyautogui
 import win32gui
 import win32api
@@ -283,22 +285,42 @@ class ActionRecorder:
         
         # 處理資產目錄：將 temp_assets 改名為 {filename}_assets
         if self.smart_mode and self.assets_dir and os.path.exists(self.assets_dir):
-            import shutil
             final_assets_dir = self.filename.replace(".json", "_assets")
             
+            # 定義一個處理唯讀檔案的 helper (Windows 常用)
+            def remove_readonly(func, path, _):
+                os.chmod(path, stat.S_IWRITE)
+                func(path)
+
             try:
+                # 確保我們不試圖移除正在使用的資料夾本身 (如果是 recording 的 tmp)
+                if os.path.abspath(self.assets_dir) == os.path.abspath(final_assets_dir):
+                    self.log(f"✓ 視覺樣板已在目標目錄: {final_assets_dir}")
+                    return
+
                 # 如果目標資料夾已存在，先嘗試刪除
                 if os.path.exists(final_assets_dir):
-                    # 這裡加上一點延遲，避免剛停止播放時檔案還被鎖定
-                    time.sleep(0.5)
-                    shutil.rmtree(final_assets_dir)
+                    # 增加延遲，讓系統釋放控制代碼
+                    time.sleep(1.0) 
+                    try:
+                        shutil.rmtree(final_assets_dir, onerror=remove_readonly)
+                    except Exception as e:
+                        self.log(f"⚠️ 無法刪除舊的資產目錄 (可能被鎖定): {e}")
+                        # 如果刪不掉，我們換個名字存，以免錄製內容丟失
+                        final_assets_dir = final_assets_dir + "_" + time.strftime("%H%M%S")
+                        self.log(f"   將嘗試保存至新目錄: {final_assets_dir}")
                 
                 # 重新命名暫存目錄
-                os.rename(self.assets_dir, final_assets_dir)
-                self.assets_dir = final_assets_dir
-                self.log(f"✓ 視覺樣板已保存到: {final_assets_dir}")
+                # 再次確保 assets_dir 存在且未被重新命名
+                if os.path.exists(self.assets_dir):
+                    os.rename(self.assets_dir, final_assets_dir)
+                    self.assets_dir = final_assets_dir
+                    self.log(f"✓ 視覺樣板已保存到: {final_assets_dir}")
+                else:
+                    self.log(f"⚠️ 找不到暫存資產目錄，略過重新命名")
+
             except Exception as e:
-                self.log(f"⚠️ 無法更新資產資料夾 (存取被拒): {e}")
+                self.log(f"⚠️ 更新資產資料夾時發生錯誤: {e}")
                 self.log(f"   暫存資料夾保留在: {self.assets_dir}")
 
         self.log(f"✓ 操作已保存到: {self.filename}")
