@@ -5,8 +5,9 @@ from pynput import mouse, keyboard
 from ld_controller import get_ldplayer_window
 
 class ActionRecorder:
-    def __init__(self, filename="actions_record.json"):
+    def __init__(self, filename="actions_record.json", window_title=None):
         self.filename = filename
+        self.window_title = window_title
         self.actions = []
         self.recording = False
         self.start_time = None
@@ -78,7 +79,7 @@ class ActionRecorder:
         
         # 獲取模擬器窗口
         try:
-            self.window = get_ldplayer_window()
+            self.window = get_ldplayer_window(self.window_title)
             self.window.activate()  # 激活窗口
             print(f"✓ 已鎖定窗口: {self.window.title}")
             print(f"✓ 窗口位置: ({self.window.left}, {self.window.top})")

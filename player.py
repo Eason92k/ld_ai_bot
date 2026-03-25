@@ -6,8 +6,9 @@ from pynput import keyboard
 import threading
 
 class ActionPlayer:
-    def __init__(self, filename="actions_record.json"):
+    def __init__(self, filename="actions_record.json", window_title=None):
         self.filename = filename
+        self.window_title = window_title
         self.actions = []
         self.playing = False
         self.log_callback = None
@@ -43,23 +44,21 @@ class ActionPlayer:
             except:
                 pass
     
-    def play(self, repeat=1):
+    def play(self, repeat=1, window_titles=None):
         if not self.actions:
             self.log("✗ 沒有操作可以播放")
             return
         
+        if not window_titles:
+            self.log("✗ 未指定目標視窗")
+            return
+
         self.log(f"=== 準備播放操作 ===")
+        self.log(f"✓ 目標視窗: {', '.join(window_titles)}")
         self.log(f"✓ 將重複: {repeat} 次")
         self.log("✓ 停止播放: 按 ESC 或 F12 鍵")
-        self.log("⏳ 5 秒後開始播放...\n")
-        time.sleep(5)
-        
-        # 確保遊戲窗口在前面
-        try:
-            window = get_ldplayer_window()
-            window.activate()
-        except Exception as e:
-            self.log(f"✗ 警告: 無法激活遊戲窗口 - {e}")
+        self.log("⏳ 3 秒後開始播放...\n")
+        time.sleep(3)
         
         # 啟動鍵盤監聽線程
         self.playing = True
@@ -72,7 +71,13 @@ class ActionPlayer:
                 break
             
             self.log(f"\n--- 循環 {cycle + 1}/{repeat} ---")
-            self.play_once()
+            
+            # 對於每個視窗執行一次
+            for title in window_titles:
+                if not self.playing: break
+                self.log(f"  ▶ 執行視窗: {title}")
+                self.window_title = title
+                self.play_once()
         
         self.playing = False
         keyboard_listener.stop()
@@ -82,9 +87,9 @@ class ActionPlayer:
         if not self.actions:
             return
         
-        # 獲取模擬器窗口位置
+        # 獲獲模擬器窗口位置
         try:
-            window = get_ldplayer_window()
+            window = get_ldplayer_window(self.window_title)
             window.activate()
         except Exception as e:
             self.log(f"✗ 警告: 無法獲取窗口 - {e}")
@@ -130,134 +135,6 @@ class ActionPlayer:
         self.log("✓ 本循環播放完成")
 
 if __name__ == "__main__":
-    import tkinter as tk
-    from tkinter import filedialog, messagebox
-    from tkinter.scrolledtext import ScrolledText
-    from recorder import ActionRecorder
-
-    player = ActionPlayer()
-    recorder = ActionRecorder(filename=player.filename)
-
-    def append_log(message):
-        timestamp = time.strftime("%H:%M:%S")
-
-        def update_log():
-            log_text.config(state="normal")
-            log_text.insert("end", f"[{timestamp}] {message}\n")
-            log_text.see("end")
-            log_text.config(state="disabled")
-
-        root.after(0, update_log)
-
-    player.log_callback = append_log
-    recorder.log_callback = append_log
-
-    def select_file():
-        path = filedialog.askopenfilename(
-            title="選擇動作記錄檔",
-            filetypes=[("JSON 檔案", "*.json"), ("全部檔案", "*.*")]
-        )
-        if path:
-            filename_var.set(path)
-
-    def start_record():
-        filename = filename_var.get().strip()
-        if filename:
-            recorder.filename = filename
-        recorder.recording = True
-        status_var.set("錄製中...")
-        start_record_btn.config(state="disabled")
-        stop_record_btn.config(state="normal")
-        record_thread = threading.Thread(target=recorder.start, daemon=True)
-        record_thread.start()
-
-    def stop_record():
-        recorder.stop()
-        status_var.set("錄製已停止")
-        stop_record_btn.config(state="disabled")
-        start_record_btn.config(state="normal")
-
-    def start_play():
-        filename = filename_var.get().strip()
-        if not filename:
-            messagebox.showwarning("警告", "請先選擇動作檔案")
-            return
-
-        try:
-            repeat = int(repeat_var.get())
-            if repeat < 1:
-                raise ValueError
-        except ValueError:
-            messagebox.showwarning("警告", "請輸入正整數的重複次數")
-            return
-
-        player.filename = filename
-        if not player.load():
-            status_var.set("載入失敗")
-            return
-
-        status_var.set("播放中...")
-        play_btn.config(state="disabled")
-        stop_play_btn.config(state="normal")
-        repeat_entry.config(state="disabled")
-
-        def run_play():
-            player.play(repeat=repeat)
-            if player.playing:
-                status_var.set("已完成")
-            play_btn.config(state="normal")
-            stop_play_btn.config(state="disabled")
-            repeat_entry.config(state="normal")
-
-        threading.Thread(target=run_play, daemon=True).start()
-
-    def stop_play():
-        if player.playing:
-            player.playing = False
-            status_var.set("已停止")
-            stop_play_btn.config(state="disabled")
-            play_btn.config(state="normal")
-            repeat_entry.config(state="normal")
-
-    root = tk.Tk()
-    root.title("ActionPlayer 綜合控制面板")
-    root.geometry("700x520")
-
-    filename_var = tk.StringVar(value=player.filename)
-    repeat_var = tk.StringVar(value="1")
-    status_var = tk.StringVar(value="等待中")
-
-    frame_top = tk.Frame(root)
-    frame_top.pack(fill="x", padx=12, pady=10)
-
-    tk.Label(frame_top, text="動作記錄檔:", width=14, anchor="e").grid(row=0, column=0, padx=5, pady=5)
-    tk.Entry(frame_top, textvariable=filename_var, width=48).grid(row=0, column=1, padx=5, pady=5)
-    tk.Button(frame_top, text="選擇", command=select_file, width=10).grid(row=0, column=2, padx=5, pady=5)
-
-    tk.Label(frame_top, text="重複次數:", width=14, anchor="e").grid(row=1, column=0, padx=5, pady=5)
-    repeat_entry = tk.Entry(frame_top, textvariable=repeat_var, width=10)
-    repeat_entry.grid(row=1, column=1, sticky="w", padx=5, pady=5)
-
-    tk.Label(frame_top, text="狀態:", width=14, anchor="e").grid(row=2, column=0, padx=5, pady=5)
-    tk.Label(frame_top, textvariable=status_var, width=48, anchor="w").grid(row=2, column=1, padx=5, pady=5)
-
-    frame_btn = tk.Frame(root)
-    frame_btn.pack(fill="x", padx=12, pady=6)
-
-    start_record_btn = tk.Button(frame_btn, text="開始錄製", command=start_record, width=12, bg="#008CBA", fg="white")
-    start_record_btn.grid(row=0, column=0, padx=5, pady=5)
-
-    stop_record_btn = tk.Button(frame_btn, text="停止錄製", command=stop_record, width=12, bg="#FF9800", fg="white", state="disabled")
-    stop_record_btn.grid(row=0, column=1, padx=5, pady=5)
-
-    play_btn = tk.Button(frame_btn, text="開始播放", command=start_play, width=12, bg="#4CAF50", fg="white")
-    play_btn.grid(row=0, column=2, padx=5, pady=5)
-
-    stop_play_btn = tk.Button(frame_btn, text="停止播放", command=stop_play, width=12, bg="#F44336", fg="white", state="disabled")
-    stop_play_btn.grid(row=0, column=3, padx=5, pady=5)
-
-    tk.Label(root, text="執行日誌: (可滾動)", anchor="w").pack(anchor="w", padx=12)
-    log_text = ScrolledText(root, height=18, wrap="word", state="disabled")
-    log_text.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-
-    root.mainloop()
+    # 原有的 GUI 邏輯已移至 main.py
+    # 執行 python main.py 即可開啟控制面板
+    print("請執行 python main.py 來啟動控制面板")
