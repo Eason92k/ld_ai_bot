@@ -2,16 +2,22 @@ import json
 import time
 import win32api
 import win32con
-from ld_controller import list_all_ldplayer_windows, send_click, send_key, send_swipe
+import cv2
+import numpy as np
+import os
+from PIL import Image
+from ld_controller import list_all_ldplayer_windows, send_click, send_key, send_swipe, get_window_screenshot
 
 from pynput import keyboard
 import threading
 
 class ActionPlayer:
-    def __init__(self, filename="actions_record.json"):
+    def __init__(self, filename=""):
         self.filename = filename
         self.actions = []
         self.mode = "sync"
+        self.smart_mode = False
+        self.assets_dir = None
         self.playing = False
         self.log_callback = None
 
@@ -26,18 +32,29 @@ class ActionPlayer:
 
     def load(self):
         try:
+            if not self.filename:
+                return False
             with open(self.filename, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 if isinstance(data, dict) and "actions" in data:
                     self.actions = data["actions"]
                     self.mode = data.get("mode", "sync")
+                    self.smart_mode = data.get("smart_mode", False)
                 else:
                     self.actions = data
-                    self.mode = "sync" # 舊格式默認為同步
-            self.log(f"✓ 已加載 {len(self.actions)} 個操作 (模式: {self.mode})")
+                    self.mode = "sync"
+                    self.smart_mode = False
+            
+            if self.smart_mode:
+                self.assets_dir = self.filename.replace(".json", "_assets")
+                if not os.path.exists(self.assets_dir):
+                    self.log("⚠️ 警告: 找不到視覺樣板資料夾，將忽略視覺檢查")
+                    self.smart_mode = False
+
+            self.log(f"✓ 已加載 {len(self.actions)} 個操作 (模式: {self.mode}, Smart: {self.smart_mode})")
             return True
-        except FileNotFoundError:
-            self.log(f"✗ 找不到文件: {self.filename}")
+        except Exception as e:
+            self.log(f"✗ 載入失敗: {e}")
             return False
     
     def on_key_press(self, key):
@@ -82,40 +99,31 @@ class ActionPlayer:
     
     def run_actions(self, target_windows):
         prev_time = 0
-        
-        # 建立 HWND 對應表以便獨立模式查找
         window_map = {title: hwnd for title, hwnd in target_windows}
 
         for action in self.actions:
             if not self.playing: return
             
-            # 等待時間
             current_time = action['time']
             wait_time = current_time - prev_time
             if wait_time > 0:
                 time.sleep(wait_time)
             
-            # 獲取目標視窗列表
             if self.mode == "sync":
-                # 同步模式：所有人都要做
                 target_hwnds = [hwnd for _, hwnd in target_windows]
             else:
-                # 獨立模式：根據標註執行
                 target_title = action.get("window_title")
                 if target_title in window_map:
                     target_hwnds = [window_map[target_title]]
                 else:
-                    # 如果找不到標註的視窗，跳過
                     target_hwnds = []
 
-            # 執行動作 - 使用執行緒達成真正同步
             threads = []
             for hwnd in target_hwnds:
                 t = threading.Thread(target=self.execute_single_action, args=(hwnd, action))
                 t.start()
                 threads.append(t)
             
-            # 等待所有視窗完成此動作再繼續下一個時間點
             for t in threads:
                 t.join()
 
@@ -124,6 +132,15 @@ class ActionPlayer:
     def execute_single_action(self, hwnd, action):
         """在特定視窗執行單個動作"""
         try:
+            # 視覺檢查邏輯
+            if self.smart_mode and action.get("asset") and action['type'] == 'click':
+                asset_path = os.path.join(self.assets_dir, action["asset"])
+                if os.path.exists(asset_path):
+                    if not self.wait_for_asset(hwnd, asset_path):
+                        self.log(f"  ⚠️ 視覺檢查超時，視窗 {hwnd} 可能處於錯誤狀態")
+                else:
+                    self.log(f"  ⚠️ 找不到樣板檔案: {asset_path}")
+
             if action['type'] == 'click':
                 send_click(hwnd, action['x'], action['y'])
             elif action['type'] == 'key':
@@ -136,7 +153,32 @@ class ActionPlayer:
         except Exception as e:
             self.log(f"  ✗ 錯誤: 視窗 {hwnd} 執行失敗 - {e}")
 
+    def wait_for_asset(self, hwnd, asset_path, timeout=8):
+        """等待視窗中出現樣板圖片 (支援中文路徑)"""
+        try:
+            # 使用 numpy 讀取以支援中文路徑
+            template = cv2.imdecode(np.fromfile(asset_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        except Exception as e:
+            self.log(f"  ⚠️ 讀取樣板失敗: {e}")
+            return False
+        
+        if template is None: return False
+        
+        start_wait = time.time()
+        while time.time() - start_wait < timeout:
+            if not self.playing: return False
+            
+            im = get_window_screenshot(hwnd)
+            if im:
+                screen_cv = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+                result = cv2.matchTemplate(screen_cv, template, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, _ = cv2.minMaxLoc(result)
+                
+                if max_val > 0.6: # 信心度門檻 (從 0.8 調低以提高相容性)
+                    return True
+            
+            time.sleep(0.5)
+        return False
 
 if __name__ == "__main__":
     print("請執行 python main.py 來啟動控制面板")
-

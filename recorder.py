@@ -1,14 +1,23 @@
 import json
 import time
+import os
 import pyautogui
 import win32gui
 import win32api
 from pynput import mouse, keyboard
-from ld_controller import get_ldplayer_window
+from ld_controller import get_ldplayer_window, get_window_screenshot
 
 class ActionRecorder:
-    def __init__(self, filename="actions_record.json"):
-        self.filename = filename
+    def __init__(self, filename=None):
+        self.scripts_dir = "scripts"
+        if not os.path.exists(self.scripts_dir):
+            os.makedirs(self.scripts_dir)
+            
+        if filename:
+            self.filename = filename
+        else:
+            # 預設不設定，save 時動態生成
+            self.filename = None
         self.target_windows = []  # 格式: [(title, hwnd), ...]
         self.actions = []
         self.recording = False
@@ -17,6 +26,8 @@ class ActionRecorder:
         self.mouse_down_pos = None
         self.mouse_down_time = None
         self.recording_mode = "sync"  # "sync" (錄一跑多) 或 "independent" (獨立錄製)
+        self.smart_mode = False
+        self.assets_dir = None
 
     def log(self, message):
         if self.log_callback:
@@ -117,6 +128,12 @@ class ActionRecorder:
                             "x": rel_end_x,
                             "y": rel_end_y
                         })
+                        
+                        # 如果是同步點擊，嘗試抓取視覺樣板
+                        if self.smart_mode and action_data["type"] == "click":
+                            asset = self.capture_click_asset(hwnd, self.mouse_down_pos[0], self.mouse_down_pos[1], len(self.actions))
+                            if asset:
+                                action_data["asset"] = asset
                     
                     self.actions.append(action_data)
 
@@ -160,7 +177,32 @@ class ActionRecorder:
                 "window_title": title
             })
     
-    def start(self, target_windows, mode="sync"):
+    def capture_click_asset(self, hwnd, x, y, action_index):
+        if not self.smart_mode or not self.assets_dir:
+            return None
+        
+        try:
+            im = get_window_screenshot(hwnd)
+            if im:
+                # 轉為客戶區座標 (目前 x, y 是屏幕座標)
+                rel_x, rel_y = win32gui.ScreenToClient(hwnd, (int(x), int(y)))
+                
+                # 截取點擊點周圍 50x50
+                size = 25
+                left = max(0, rel_x - size)
+                top = max(0, rel_y - size)
+                right = min(im.size[0], rel_x + size)
+                bottom = min(im.size[1], rel_y + size)
+                
+                crop = im.crop((left, top, right, bottom))
+                asset_name = f"action_{action_index}.png"
+                crop.save(os.path.join(self.assets_dir, asset_name))
+                return asset_name
+        except Exception as e:
+            self.log(f"⚠️ 視覺樣板截取失敗: {e}")
+        return None
+
+    def start(self, target_windows, mode="sync", smart_mode=False):
         """
         target_windows: [(title, hwnd), ...]
         mode: "sync" 或 "independent"
@@ -171,11 +213,23 @@ class ActionRecorder:
 
         self.target_windows = target_windows
         self.recording_mode = mode
+        self.smart_mode = smart_mode
         self.actions = []
         self.recording = True
         self.start_time = time.time()
 
-        self.log(f"=== 開始錄製 ({'錄一跑多' if mode=='sync' else '獨立錄製'}) ===")
+        # 準備資產目錄
+        if self.smart_mode:
+            # 我們在 save 時才會知道最終檔名，這裡先用臨時的或預設的
+            # 實際上 save 時再移動可能更好，但為了當下能存，先建一個暫存區
+            self.assets_dir = os.path.join(self.scripts_dir, "temp_assets")
+            if not os.path.exists(self.assets_dir):
+                os.makedirs(self.assets_dir)
+            # 清空暫存區
+            for f in os.listdir(self.assets_dir):
+                os.remove(os.path.join(self.assets_dir, f))
+
+        self.log(f"=== 開始錄製 ({'錄一跑多' if mode=='sync' else '獨立錄製'}) {'[Smart Mode]' if smart_mode else ''} ===")
         for title, hwnd in target_windows:
             self.log(f"✓ 監聽視窗: {title}")
         self.log("停止錄製: 按 ESC 或 F12 鍵")
@@ -200,13 +254,53 @@ class ActionRecorder:
             self.save()
     
     def save(self):
+        # 如果沒指定檔名，使用統一命名「錄製腳本」並處理重複
+        if not self.filename:
+            base_name = "錄製腳本"
+            ext = ".json"
+            target_path = os.path.join(self.scripts_dir, f"{base_name}{ext}")
+            
+            if os.path.exists(target_path):
+                counter = 1
+                while os.path.exists(os.path.join(self.scripts_dir, f"{base_name}{counter}{ext}")):
+                    counter += 1
+                target_path = os.path.join(self.scripts_dir, f"{base_name}{counter}{ext}")
+            
+            self.filename = target_path
+        elif not os.path.isabs(self.filename) and not self.filename.startswith(self.scripts_dir):
+            self.filename = os.path.join(self.scripts_dir, self.filename)
+
+        # 確保目錄存在
+        os.makedirs(os.path.dirname(self.filename), exist_ok=True)
         # 存檔時包含元數據
         output = {
             "mode": self.recording_mode,
+            "smart_mode": self.smart_mode,
             "actions": self.actions
         }
         with open(self.filename, 'w', encoding='utf-8') as f:
             json.dump(output, f, indent=2, ensure_ascii=False)
+        
+        # 處理資產目錄：將 temp_assets 改名為 {filename}_assets
+        if self.smart_mode and self.assets_dir and os.path.exists(self.assets_dir):
+            import shutil
+            final_assets_dir = self.filename.replace(".json", "_assets")
+            
+            try:
+                # 如果目標資料夾已存在，先嘗試刪除
+                if os.path.exists(final_assets_dir):
+                    # 這裡加上一點延遲，避免剛停止播放時檔案還被鎖定
+                    time.sleep(0.5)
+                    shutil.rmtree(final_assets_dir)
+                
+                # 重新命名暫存目錄
+                os.rename(self.assets_dir, final_assets_dir)
+                self.assets_dir = final_assets_dir
+                self.log(f"✓ 視覺樣板已保存到: {final_assets_dir}")
+            except Exception as e:
+                self.log(f"⚠️ 無法更新資產資料夾 (存取被拒): {e}")
+                self.log(f"   暫存資料夾保留在: {self.assets_dir}")
+
         self.log(f"✓ 操作已保存到: {self.filename}")
         self.log(f"✓ 總共記錄: {len(self.actions)} 個操作")
 

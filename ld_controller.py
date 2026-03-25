@@ -3,6 +3,9 @@ import win32gui
 import win32api
 import win32con
 import time
+import win32ui
+import ctypes
+from PIL import Image
 
 def list_all_ldplayer_windows():
     """列出所有可能是雷電模擬器的窗口 (傳回標題與句柄)"""
@@ -128,8 +131,47 @@ def send_swipe(hwnd, start_x, start_y, end_x, end_y, duration=0.3):
 def send_key(hwnd, key_code):
     """使用 PostMessage 發送按鍵"""
     target_hwnd = find_sub_window(hwnd)
-    win32gui.PostMessage(target_hwnd, win32con.WM_KEYDOWN, key_code, 0)
-    time.sleep(0.01)
     win32gui.PostMessage(target_hwnd, win32con.WM_KEYUP, key_code, 0)
+
+def get_window_screenshot(hwnd):
+    """抓取視窗截圖並回傳 PIL Image"""
+    try:
+        # 獲取視窗客戶區寬高
+        rect = win32gui.GetClientRect(hwnd)
+        w = rect[2] - rect[0]
+        h = rect[3] - rect[1]
+
+        hwndDC = win32gui.GetWindowDC(hwnd)
+        mfcDC  = win32ui.CreateDCFromHandle(hwndDC)
+        saveDC = mfcDC.CreateCompatibleDC()
+
+        saveBitMap = win32ui.CreateBitmap()
+        saveBitMap.CreateCompatibleBitmap(mfcDC, w, h)
+
+        saveDC.SelectObject(saveBitMap)
+
+        # 使用 ctypes 調用 PrintWindow，解決 win32gui 可能找不到該屬性的問題
+        result = ctypes.windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 2)
+        if result == 0:
+            # 如果模式 2 失敗，嘗試模式 0
+            ctypes.windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 0)
+
+        bmpinfo = saveBitMap.GetInfo()
+        bmpstr = saveBitMap.GetBitmapBits(True)
+
+        im = Image.frombuffer(
+            'RGB',
+            (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
+            bmpstr, 'raw', 'BGRX', 0, 1)
+
+        win32gui.DeleteObject(saveBitMap.GetHandle())
+        saveDC.DeleteDC()
+        mfcDC.DeleteDC()
+        win32gui.ReleaseDC(hwnd, hwndDC)
+        
+        return im
+    except Exception as e:
+        print(f"截圖失敗: {e}")
+        return None
 
 

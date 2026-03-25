@@ -3,13 +3,14 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 import time
 import threading
+import os
 from player import ActionPlayer
 from recorder import ActionRecorder
 from ld_controller import list_all_ldplayer_windows
 
 def main():
-    player = ActionPlayer()
-    recorder = ActionRecorder(filename=player.filename)
+    player = ActionPlayer(filename="") # 初始不設定檔名
+    recorder = ActionRecorder() # 初始不設定檔名
 
     def append_log(message):
         timestamp = time.strftime("%H:%M:%S")
@@ -24,6 +25,26 @@ def main():
 
     player.log_callback = append_log
     recorder.log_callback = append_log
+
+    def update_script_list(auto_select=True):
+        scripts_dir = "scripts"
+        if not os.path.exists(scripts_dir):
+            os.makedirs(scripts_dir)
+        
+        files = sorted([f for f in os.listdir(scripts_dir) if f.endswith(".json")], reverse=True)
+        script_combo['values'] = files
+        
+        # 只有在明確要求（如錄製完）或沒有現有選擇時才自動選取最新的一個
+        if files and (auto_select or not filename_var.get()):
+            # 不自動選取第一個，讓使用者決定是要錄製還是要選取
+            # 或者我們可以讓它預設為空白，除非是剛錄好
+            pass
+
+    def on_script_select(event):
+        selected = script_combo.get()
+        if selected:
+            full_path = os.path.join("scripts", selected)
+            filename_var.set(full_path)
 
     def select_file():
         path = filedialog.askopenfilename(
@@ -55,13 +76,16 @@ def main():
 
         if filename:
             recorder.filename = filename
+        else:
+            recorder.filename = None # 讓 recorder 自動生成
         
         status_var.set("錄製中...")
         start_record_btn.config(state="disabled")
         stop_record_btn.config(state="normal")
         
         # 啟動錄製線程
-        record_thread = threading.Thread(target=recorder.start, args=(selected_info, mode), daemon=True)
+        smart_mode = smart_var.get()
+        record_thread = threading.Thread(target=recorder.start, args=(selected_info, mode, smart_mode), daemon=True)
         record_thread.start()
 
     def stop_record():
@@ -69,6 +93,7 @@ def main():
         status_var.set("錄製已停止")
         stop_record_btn.config(state="disabled")
         start_record_btn.config(state="normal")
+        update_script_list(auto_select=False) # 錄製完更新清單，但不自動選取，保留「新錄製」狀態
 
     def start_play():
         filename = filename_var.get().strip()
@@ -115,10 +140,11 @@ def main():
     root.title("LD AI Bot - 多開同步版")
     root.geometry("750x700")
 
-    filename_var = tk.StringVar(value=player.filename)
+    filename_var = tk.StringVar(value="")
     repeat_var = tk.StringVar(value="1")
     status_var = tk.StringVar(value="等待中")
     mode_var = tk.IntVar(value=0) # 0: Sync, 1: Independent
+    smart_var = tk.BooleanVar(value=False)
     
     window_vars = {} # {title: {'var': BooleanVar, 'hwnd': int}}
     
@@ -140,17 +166,27 @@ def main():
     frame_top = tk.LabelFrame(root, text="基本設定")
     frame_top.pack(fill="x", padx=12, pady=5)
 
-    tk.Label(frame_top, text="記錄檔:").grid(row=0, column=0, padx=5, pady=5)
-    tk.Entry(frame_top, textvariable=filename_var, width=50).grid(row=0, column=1, padx=5, pady=5)
-    tk.Button(frame_top, text="選擇", command=select_file).grid(row=0, column=2, padx=5, pady=5)
+    tk.Label(frame_top, text="腳本清單:").grid(row=0, column=0, padx=5, pady=5)
+    script_combo = ttk.Combobox(frame_top, width=47, state="readonly")
+    script_combo.grid(row=0, column=1, padx=5, pady=5)
+    script_combo.bind("<<ComboboxSelected>>", on_script_select)
+    
+    btn_refresh = tk.Button(frame_top, text="整理", command=update_script_list)
+    btn_refresh.grid(row=0, column=2, padx=5, pady=5)
 
-    tk.Label(frame_top, text="重複次數:").grid(row=1, column=0, padx=5, pady=5)
-    tk.Entry(frame_top, textvariable=repeat_var, width=10).grid(row=1, column=1, sticky="w", padx=5, pady=5)
+    tk.Label(frame_top, text="檔案路徑:").grid(row=1, column=0, padx=5, pady=5)
+    tk.Entry(frame_top, textvariable=filename_var, width=50).grid(row=1, column=1, padx=5, pady=5)
+    tk.Button(frame_top, text="自選", command=select_file).grid(row=1, column=2, padx=5, pady=5)
+    tk.Button(frame_top, text="清空", command=lambda: (filename_var.set(""), script_combo.set(""))).grid(row=1, column=3, padx=5, pady=5)
+
+    tk.Label(frame_top, text="重複次數:").grid(row=2, column=0, padx=5, pady=5)
+    tk.Entry(frame_top, textvariable=repeat_var, width=10).grid(row=2, column=1, sticky="w", padx=5, pady=5)
 
     frame_mode = tk.LabelFrame(root, text="運作模式")
     frame_mode.pack(fill="x", padx=12, pady=5)
     tk.Radiobutton(frame_mode, text="錄一跑多 (同步操作)", variable=mode_var, value=0).pack(side="left", padx=20)
     tk.Radiobutton(frame_mode, text="多窗獨立 (各自錄製)", variable=mode_var, value=1).pack(side="left", padx=20)
+    tk.Checkbutton(frame_mode, text="啟用視覺檢查 (Smart Mode)", variable=smart_var, fg="purple").pack(side="left", padx=20)
 
     frame_mid = tk.LabelFrame(root, text="模擬器選取")
     frame_mid.pack(fill="both", expand=False, padx=12, pady=5)
@@ -186,6 +222,7 @@ def main():
     log_text.pack(fill="both", expand=True, padx=12, pady=5)
 
     root.after(100, refresh_windows)
+    root.after(200, lambda: update_script_list(auto_select=False))
     root.mainloop()
 
 if __name__ == "__main__":
