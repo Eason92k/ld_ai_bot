@@ -23,3 +23,14 @@ def do_action(action):
 
     elif action == "IDLE":
         pass
+
+def swipe_relative(x1, y1, x2, y2, duration=0.5):
+    win = get_ldplayer_window()
+    
+    real_x1 = win.left + x1
+    real_y1 = win.top + y1
+    real_x2 = win.left + x2
+    real_y2 = win.top + y2
+    
+    pyautogui.moveTo(real_x1, real_y1)
+    pyautogui.dragTo(real_x2, real_y2, duration=duration, button='left')
