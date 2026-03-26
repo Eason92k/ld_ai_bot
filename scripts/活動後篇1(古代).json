@@ -45,7 +45,7 @@
       "type": "combat_skill",
       "params": {
         "preset_file": "技能預設.json",
-        "set_name": "日常"
+        "set_name": "古代"
       }
     }
   ]

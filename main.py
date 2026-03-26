@@ -23,6 +23,11 @@ def main():
     skill_player = SkillPresetPlayer()
     adv_player = AdvancedActionPlayer(skill_player=skill_player)
 
+    # --- 多開管理數據結構 ---
+    instance_players = {}   # {hwnd: player_obj}
+    instance_threads = {}   # {hwnd: thread_obj}
+    instance_row_vars = {}  # {hwnd: {'status': StringVar, 'script': StringVar, 'check': BooleanVar, 'btn': Button}}
+
     def append_log(message):
         timestamp = time.strftime("%H:%M:%S")
         def update_log():
@@ -591,22 +596,35 @@ def main():
     calibrating_state = {"active": False, "queue": [], "current": None}
     parsed_presets = []  # 解析後的套組
 
-    # --- 載入已儲存的座標 ---
-    COORD_FILE = os.path.join("scripts", "skill_presets", "coordinates.json")
-    def load_saved_coords():
-        ensure_preset_dir()
-        if os.path.exists(COORD_FILE):
-            try:
-                with open(COORD_FILE, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except: pass
-        return {}
-    def save_coords():
-        ensure_preset_dir()
-        with open(COORD_FILE, 'w', encoding='utf-8') as f:
-            json.dump(skill_positions, f, indent=2, ensure_ascii=False)
+    # --- 座標與預設資料管理 ---
+    def load_all_skill_data(filename=None):
+        """載入指定檔案的技能相關資料（含座標與指令）"""
+        data = load_preset(filename) 
+        if data:
+            if data.get("positions"):
+                skill_positions.update(data["positions"])
+            if data.get("skill_text"):
+                skill_text.delete("1.0", "end")
+                skill_text.insert("1.0", data["skill_text"])
+            if "cast_interval" in data:
+                skill_interval_var.set(str(data["cast_interval"]))
+            if "battle_only" in data:
+                skill_battle_var.set(data["battle_only"])
+            
+            update_coord_labels()
+            parse_skill_text()
+            return True
+        return False
 
-    skill_positions.update(load_saved_coords())
+    def save_coords():
+        """僅儲存目前的座標（保留其他設定）"""
+        raw = skill_text.get("1.0", "end").strip()
+        filename = preset_combo.get() or "技能預設.json"
+        try:
+            interval = float(skill_interval_var.get())
+        except:
+            interval = 0.3
+        save_preset(raw, skill_positions, skill_battle_var.get(), interval, filename=filename)
 
     # ── 技能指令輸入區 ──
     f_skill_input = tk.LabelFrame(tab3, text="技能指令 (語法: @ 分套  : 分組  - 等待秒數  1-6 武器技能  a-f 角色技能)")
@@ -872,31 +890,33 @@ def main():
         if not raw:
             messagebox.showwarning("警告", "請先輸入技能指令")
             return
+        
+        # 取得選定的檔名或提示輸入
+        sel = preset_combo.get().strip()
+        if not sel:
+            from tkinter import simpledialog
+            sel = simpledialog.askstring("儲存預設", "請輸入預設檔名:", initialvalue="技能預設.json")
+            if not sel: return
+
         try:
             interval = float(skill_interval_var.get())
         except:
             interval = 0.3
-        fn = save_preset(raw, skill_positions, skill_battle_var.get(), interval)
-        append_log(f"✓ 技能預設已儲存: {fn}")
+        
+        fn = save_preset(raw, skill_positions, skill_battle_var.get(), interval, filename=sel)
+        append_log(f"✓ 技能預設已儲存至 {fn}")
         update_preset_list()
+        preset_combo.set(fn)
 
     def load_skill_preset():
         sel = preset_combo.get()
         if not sel:
+            messagebox.showwarning("警告", "請先選擇一個預設檔案")
             return
-        data = load_preset(sel)
-        if data:
-            skill_text.delete("1.0", "end")
-            skill_text.insert("1.0", data.get("skill_text", ""))
-            if data.get("positions"):
-                skill_positions.update(data["positions"])
-                update_coord_labels()
-            if "cast_interval" in data:
-                skill_interval_var.set(str(data["cast_interval"]))
-            if "battle_only" in data:
-                skill_battle_var.set(data["battle_only"])
-            parse_skill_text()
-            append_log(f"✓ 已載入預設: {sel}")
+        if load_all_skill_data(sel):
+            append_log(f"✓ 已載入 {sel}")
+        else:
+            append_log(f"⚠️ 載入失敗: {sel}")
 
     def update_preset_list():
         files = list_presets()
@@ -909,7 +929,194 @@ def main():
     preset_combo.pack(side="left", padx=3)
     tk.Button(f_skill_ctrl, text="載入預設", command=load_skill_preset, bg="#FF9800", fg="white", height=2, width=10).pack(side="left", padx=3)
 
-    root.after(300, update_preset_list)
+    # 啟動時自動載入或優先選取「技能預設.json」
+    def init_load():
+        update_preset_list()
+        files = list_presets()
+        if files:
+            target = "技能預設.json"
+            if target in files:
+                preset_combo.set(target)
+                load_all_skill_data(target)
+            else:
+                preset_combo.set(files[0])
+                load_all_skill_data(files[0])
+    
+    root.after(300, init_load)
+
+    # ═══════════════════════════════════════════════════════
+    # Tab 4: 多開管理 (獨立控制)
+    # ═══════════════════════════════════════════════════════
+    tab4 = tk.Frame(nb); nb.add(tab4, text=" 多開管理 (獨立執行) ")
+
+    f_multi_ctrl = tk.Frame(tab4); f_multi_ctrl.pack(fill="x", padx=10, pady=5)
+    
+    def refresh_multi_list():
+        # 清空舊的 UI
+        for widget in multi_list_frame.winfo_children():
+            widget.destroy()
+        instance_row_vars.clear()
+        
+        found = list_all_ldplayer_windows()
+        scripts = sorted([f for f in os.listdir("scripts") if f.endswith(".json")], reverse=True)
+        
+        # 標題列
+        header_bg = "#e0e0e0"
+        tk.Label(multi_list_frame, text="選取", bg=header_bg, width=5).grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
+        tk.Label(multi_list_frame, text="模擬器視窗標題 (HWND)", bg=header_bg, width=35).grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
+        tk.Label(multi_list_frame, text="指定執行腳本", bg=header_bg, width=30).grid(row=0, column=2, sticky="nsew", padx=1, pady=1)
+        tk.Label(multi_list_frame, text="目前狀態", bg=header_bg, width=12).grid(row=0, column=3, sticky="nsew", padx=1, pady=1)
+        tk.Label(multi_list_frame, text="操作", bg=header_bg, width=10).grid(row=0, column=4, sticky="nsew", padx=1, pady=1)
+
+        for i, (title, hwnd) in enumerate(found):
+            row = i + 1
+            check_var = tk.BooleanVar(value=False)
+            script_var = tk.StringVar()
+            status_var_inst = tk.StringVar(value="停止")
+            
+            # 若已有正在執行的狀態，繼承它 (這裡簡單處理，刷新後預設停止，除非我們要追蹤全域狀態)
+            if hwnd in instance_threads and instance_threads[hwnd].is_alive():
+                status_var_inst.set("運行中")
+
+            # 選取框
+            cb = tk.Checkbutton(multi_list_frame, variable=check_var)
+            cb.grid(row=row, column=0, padx=1, pady=1)
+            
+            # 標題
+            tk.Label(multi_list_frame, text=f"{title} ({hwnd})", anchor="w").grid(row=row, column=1, sticky="w", padx=5, pady=1)
+            
+            # 腳本下拉
+            cmb = ttk.Combobox(multi_list_frame, textvariable=script_var, values=scripts, state="readonly", width=28)
+            cmb.grid(row=row, column=2, padx=5, pady=1)
+            if scripts: cmb.set(scripts[0])
+            
+            # 狀態標籤
+            lbl_status = tk.Label(multi_list_frame, textvariable=status_var_inst, fg="gray")
+            lbl_status.grid(row=row, column=3, padx=1, pady=1)
+            
+            # 開始/停止按鈕
+            btn_text = "停止" if status_var_inst.get() == "運行中" else "開始"
+            btn_bg = "#F44336" if btn_text == "停止" else "#4CAF50"
+            btn = tk.Button(multi_list_frame, text=btn_text, bg=btn_bg, fg="white", width=8)
+            btn.config(command=lambda h=hwnd, s=script_var, v=status_var_inst, b=btn: toggle_instance_play(h, s, v, b))
+            btn.grid(row=row, column=4, padx=5, pady=2)
+            
+            instance_row_vars[hwnd] = {
+                'check': check_var,
+                'script': script_var,
+                'status': status_var_inst,
+                'btn': btn,
+                'title': title
+            }
+
+    tk.Button(f_multi_ctrl, text="🔄 刷新模擬器列表", command=refresh_multi_list, bg="#008CBA", fg="white").pack(side="left", padx=5)
+    
+    def batch_action(action_type):
+        """action_type: 'start' or 'stop'"""
+        for hwnd, info in instance_row_vars.items():
+            if info['check'].get():
+                curr_status = info['status'].get()
+                if action_type == 'start' and curr_status != "運行中":
+                    toggle_instance_play(hwnd, info['script'], info['status'], info['btn'])
+                elif action_type == 'stop' and curr_status == "運行中":
+                    toggle_instance_play(hwnd, info['script'], info['status'], info['btn'])
+
+    tk.Button(f_multi_ctrl, text="▶ 啟動選中項", command=lambda: batch_action('start'), bg="#4CAF50", fg="white").pack(side="left", padx=5)
+    tk.Button(f_multi_ctrl, text="■ 停止選中項", command=lambda: batch_action('stop'), bg="#F44336", fg="white").pack(side="left", padx=5)
+
+    def select_all_instances():
+        for info in instance_row_vars.values():
+            info['check'].set(True)
+    tk.Button(f_multi_ctrl, text="全選", command=select_all_instances).pack(side="left", padx=5)
+
+    # 列表區域 (可捲動)
+    multi_list_container = tk.Frame(tab4)
+    multi_list_container.pack(fill="both", expand=True, padx=10, pady=5)
+    
+    multi_canvas = tk.Canvas(multi_list_container)
+    multi_v_scroll = ttk.Scrollbar(multi_list_container, orient="vertical", command=multi_canvas.yview)
+    multi_h_scroll = ttk.Scrollbar(multi_list_container, orient="horizontal", command=multi_canvas.xview)
+    multi_list_frame = tk.Frame(multi_canvas)
+    
+    multi_list_frame.bind("<Configure>", lambda e: multi_canvas.configure(scrollregion=multi_canvas.bbox("all")))
+    multi_canvas.create_window((0, 0), window=multi_list_frame, anchor="nw")
+    multi_canvas.configure(yscrollcommand=multi_v_scroll.set, xscrollcommand=multi_h_scroll.set)
+    
+    multi_canvas.pack(side="top", fill="both", expand=True)
+    multi_v_scroll.pack(side="right", fill="y", before=multi_canvas) # 修正 pack 順序
+    multi_v_scroll.pack_forget(); multi_v_scroll.pack(side="right", fill="y")
+    multi_h_scroll.pack(side="bottom", fill="x")
+
+    def toggle_instance_play(hwnd, script_var, status_var_inst, btn):
+        if status_var_inst.get() == "運行中":
+            # 停止
+            if hwnd in instance_players:
+                instance_players[hwnd].playing = False
+                append_log(f"🛑 已發送停止信號至 [{hwnd}]")
+        else:
+            # 開始
+            script_name = script_var.get()
+            if not script_name:
+                messagebox.showwarning("警告", "請先選擇腳本")
+                return
+            
+            script_path = os.path.join("scripts", script_name)
+            if not os.path.exists(script_path):
+                messagebox.showerror("錯誤", f"找不到腳本檔案: {script_name}")
+                return
+
+            status_var_inst.set("運行中")
+            btn.config(text="停止", bg="#F44336")
+            
+            t = threading.Thread(target=run_single_instance_task, args=(hwnd, script_path, status_var_inst, btn), daemon=True)
+            instance_threads[hwnd] = t
+            t.start()
+
+    def run_single_instance_task(hwnd, script_path, status_var_inst, btn):
+        title = ""
+        for h, info in instance_row_vars.items():
+            if h == hwnd:
+                title = info['title']
+                break
+        
+        append_log(f"🚀 啟動模擬器 [{title}] 執行腳本: {os.path.basename(script_path)}")
+        
+        try:
+            # 辨識腳本類型
+            with open(script_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            is_advanced = isinstance(data, dict) and data.get("type") == "advanced"
+            
+            # 獲取或建立 Player 實例
+            if is_advanced:
+                inst_player = AdvancedActionPlayer(skill_player=SkillPresetPlayer())
+                inst_player.steps = data.get("steps", [])
+            else:
+                inst_player = ActionPlayer(filename=script_path)
+                inst_player.load()
+            
+            inst_player.log_callback = lambda msg: append_log(f"[{title}] {msg}")
+            instance_players[hwnd] = inst_player
+            
+            # 獲取全域重複次數
+            try: repeat = int(repeat_var.get())
+            except: repeat = 1
+            
+            # 開始執行 (這會阻塞直到播放完成或停止)
+            target = [(title, hwnd)]
+            if is_advanced:
+                inst_player.play(target, repeat=repeat)
+            else:
+                inst_player.play(repeat=repeat, target_windows=target)
+                
+        except Exception as e:
+            append_log(f"❌ 模擬器 [{title}] 執行發生異常: {e}")
+        finally:
+            status_var_inst.set("停止")
+            btn.config(text="開始", bg="#4CAF50")
+            if hwnd in instance_players:
+                del instance_players[hwnd]
+            append_log(f"🏁 模擬器 [{title}] 腳本執行結束")
 
     # ═══════════════════════════════════════════════════════
     # 共用底部區域
@@ -942,7 +1149,9 @@ def main():
     tk.Label(root, text="操作日誌:").pack(anchor="w", padx=15)
     log_text = ScrolledText(root, height=10, state="disabled"); log_text.pack(fill="both", expand=True, padx=15, pady=5)
 
-    root.after(100, refresh_windows); root.after(200, lambda: update_script_list(auto_select=False))
+    root.after(100, refresh_windows)
+    root.after(150, refresh_multi_list)
+    root.after(200, lambda: update_script_list(auto_select=False))
     root.mainloop()
 
 if __name__ == "__main__":

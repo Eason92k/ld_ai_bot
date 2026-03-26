@@ -447,6 +447,7 @@ class SkillPresetPlayer:
 # 4. 預設檔案管理
 # ═══════════════════════════════════════════════════════
 PRESET_DIR = "scripts/skill_presets"
+PRESET_FILE = os.path.join(PRESET_DIR, "技能預設.json")
 
 
 def ensure_preset_dir():
@@ -458,22 +459,17 @@ def save_preset(skill_text: str, positions: dict,
                 battle_only: bool = True, cast_interval: float = 0.3,
                 filename: str = None) -> str:
     """
-    儲存預設為 JSON。
-    回傳檔名。
+    儲存預設為單一 JSON 檔案。
     """
     ensure_preset_dir()
     
     if not filename:
-        base = "技能預設"
-        ext = ".json"
-        filename = f"{base}{ext}"
-        counter = 1
-        while os.path.exists(os.path.join(PRESET_DIR, filename)):
-            filename = f"{base}{counter}{ext}"
-            counter += 1
-
+        filename = "技能預設.json"
+    
     if not filename.endswith(".json"):
         filename += ".json"
+        
+    target_file = os.path.join(PRESET_DIR, filename)
 
     data = {
         "skill_text": skill_text,
@@ -482,23 +478,76 @@ def save_preset(skill_text: str, positions: dict,
         "cast_interval": cast_interval
     }
 
-    path = os.path.join(PRESET_DIR, filename)
-    with open(path, 'w', encoding='utf-8') as f:
+    with open(target_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-    return filename
+    return os.path.basename(target_file)
 
 
-def load_preset(filename: str) -> dict:
-    """載入預設 JSON。"""
-    path = os.path.join(PRESET_DIR, filename)
-    if not os.path.exists(path):
+def load_preset(filename: str = None) -> dict:
+    """載入預設 JSON。如果成功，回傳資料內容。"""
+    ensure_preset_dir()
+    
+    # 優先嘗試 migration
+    migrate_old_data()
+
+    if not filename:
+        filename = "技能預設.json"
+        
+    target_file = os.path.join(PRESET_DIR, filename)
+    if not os.path.exists(target_file):
         return None
-    with open(path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+        
+    try:
+        with open(target_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return None
 
 
 def list_presets() -> list:
-    """列出所有預設檔案"""
+    """列出預設目錄下的所有 .json 檔案"""
     ensure_preset_dir()
-    return sorted([f for f in os.listdir(PRESET_DIR) if f.endswith(".json")])
+    return sorted([f for f in os.listdir(PRESET_DIR) if f.endswith(".json") and not f.endswith(".bak")])
+
+
+def migrate_old_data():
+    """遷移舊版的 coordinates.json 到 技能預設.json 中"""
+    coord_file = os.path.join(PRESET_DIR, "coordinates.json")
+    if not os.path.exists(coord_file):
+        return
+
+    # 如果主檔案不存在，建立一個基本的
+    if not os.path.exists(PRESET_FILE):
+        try:
+            with open(coord_file, 'r', encoding='utf-8') as f:
+                coords = json.load(f)
+            
+            data = {
+                "skill_text": "",
+                "positions": coords,
+                "battle_only": True,
+                "cast_interval": 0.3
+            }
+            with open(PRESET_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            # 備份舊檔
+            os.rename(coord_file, coord_file + ".bak")
+        except:
+            pass
+    else:
+        # 如果主檔案已存在但沒有座標，嘗試補入
+        try:
+            with open(PRESET_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            if not data.get("positions"):
+                with open(coord_file, 'r', encoding='utf-8') as f:
+                    coords = json.load(f)
+                data["positions"] = coords
+                with open(PRESET_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+                os.rename(coord_file, coord_file + ".bak")
+        except:
+            pass
