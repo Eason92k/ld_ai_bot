@@ -148,107 +148,164 @@ def main():
         script_combo.set(filename)
         filename_var.set(os.path.join("scripts", filename))
         append_log(f"✓ 已產出腳本並切換至基本功能: {filename}")
-    def add_adv_step():
+    def get_adv_step_from_ui():
         action = adv_action_var.get()
-        if action == "點擊 (Click)":
-            try:
-                x, y = int(adv_x_var.get()), int(adv_y_var.get())
-                adv_player.add_step("click", {"x": x, "y": y})
-            except: return
-        elif action == "滑動 (Swipe)":
-            try:
-                sx, sy = int(adv_x_var.get()), int(adv_y_var.get())
-                ex, ey = int(adv_ex_var.get()), int(adv_ey_var.get())
-                adv_player.add_step("swipe", {"s_x": sx, "s_y": sy, "e_x": ex, "e_y": ey})
-            except: return
-        elif action == "等候 (Wait)":
-            try:
-                sec = float(adv_x_var.get())
-                adv_player.add_step("wait", {"seconds": sec})
-                append_log(f"加入等候：{sec} 秒")
-            except: return
-        elif action == "找圖點擊 (Find&Click)":
-            path = adv_img_path.get()
-            if not path: return
-            try:
-                thr = float(adv_ex_var.get() if adv_ex_var.get() else "0.7")
-            except: thr = 0.7
-            adv_player.add_step("find_click", {"template": path, "threshold": thr})
-        elif action == "找圖跳轉 (Find&Jump)":
-            path = adv_img_path.get()
-            if not path: return
-            try:
-                thr = float(adv_x_var.get() if adv_x_var.get() else "0.7")
-                jump_val = int(adv_y_var.get() if adv_y_var.get() else "0")
-                mode_str = adv_ex_var.get().upper()
-                mode = 'absolute' if mode_str == 'A' else 'relative'
-                cond_str = adv_ey_var.get().upper()
-                condition = 'if_not_found' if cond_str == 'N' else 'if_found'
-                adv_player.add_step("find_jump", {
-                    "template": path, 
-                    "threshold": thr, 
-                    "jump_value": jump_val, 
-                    "mode": mode,
-                    "condition": condition
-                })
-            except: return
-        elif action == "戰鬥技能 (Combat Skill)":
-            # X欄 = 預設檔名, Y欄 = 套組名稱
-            p_file = adv_x_var.get().strip()
-            s_name = adv_y_var.get().strip()
-            if not p_file or not s_name: return
-            adv_player.add_step("combat_skill", {"preset_file": p_file, "set_name": s_name})
-            append_log(f"加入戰鬥技能：檔={p_file}, 套組={s_name}")
+        type_rev_map = {
+            "點擊 (Click)": "click",
+            "滑動 (Swipe)": "swipe",
+            "等候 (Wait)": "wait",
+            "找圖點擊 (Find&Click)": "find_click",
+            "找圖跳轉 (Find&Jump)": "find_jump",
+            "偵測戰鬥 (Detect Battle)": "detect_battle",
+            "等待進入戰鬥 (Wait Battle Start)": "wait_battle_start",
+            "等待戰鬥結束 (Wait Battle End)": "wait_battle_end",
+            "戰鬥技能 (Combat Skill)": "combat_skill"
+        }
+        if action not in type_rev_map: return None, None
         
-        elif action == "偵測戰鬥 (Detect Battle)":
-            # X欄 = 判定時長(秒), Y欄 = 跳轉步數, EX欄 = 模式(R/A)
-            try:
-                duration = float(adv_x_var.get()) if adv_x_var.get() else 2.0
-            except: duration = 2.0
-            try:
-                jump_val = int(adv_y_var.get() if adv_y_var.get() else "0")
-            except: jump_val = 0
-            mode_str = adv_ex_var.get().upper()
-            mode = 'absolute' if mode_str == 'A' else 'relative'
+        stype = type_rev_map[action]
+        params = {}
+        try:
+            if stype == "click":
+                params = {"x": int(adv_x_var.get()), "y": int(adv_y_var.get())}
+            elif stype == "swipe":
+                params = {"s_x": int(adv_x_var.get()), "s_y": int(adv_y_var.get()), 
+                          "e_x": int(adv_ex_var.get()), "e_y": int(adv_ey_var.get())}
+            elif stype == "wait":
+                params = {"seconds": float(adv_x_var.get())}
+            elif stype == "find_click":
+                params = {"template": adv_img_path.get(), "threshold": float(adv_ex_var.get() or "0.7")}
+            elif stype == "find_jump":
+                params = {
+                    "template": adv_img_path.get(), 
+                    "threshold": float(adv_x_var.get() or "0.7"),
+                    "jump_value": int(adv_y_var.get() or "0"),
+                    "mode": 'absolute' if adv_ex_var.get().upper() == 'A' else 'relative',
+                    "condition": 'if_not_found' if adv_ey_var.get().upper() == 'N' else 'if_found'
+                }
+            elif stype == "detect_battle":
+                params = {
+                    "duration": float(adv_x_var.get() or "2.0"),
+                    "jump_value": int(adv_y_var.get() or "0"),
+                    "mode": 'absolute' if adv_ex_var.get().upper() == 'A' else 'relative'
+                }
+            elif stype in ("wait_battle_start", "wait_battle_end"):
+                params = {
+                    "timeout": float(adv_x_var.get() or "60"),
+                    "poll_interval": 1.0,
+                    "on_timeout_jump": adv_ex_var.get().upper() == 'Y',
+                    "jump_value": int(adv_y_var.get() or "0")
+                }
+            elif stype == "combat_skill":
+                params = {"preset_file": adv_x_var.get().strip(), "set_name": adv_y_var.get().strip()}
+            return stype, params
+        except Exception as e:
+            append_log(f"⚠️ 參數格式錯誤: {e}")
+            return None, None
+
+    def add_adv_step():
+        stype, params = get_adv_step_from_ui()
+        if stype:
+            adv_player.add_step(stype, params)
+            update_adv_list()
+            if stype == "wait": append_log(f"加入等候：{params['seconds']} 秒")
+            elif stype == "combat_skill": append_log(f"加入戰鬥技能：檔={params['preset_file']}, 套組={params['set_name']}")
+            elif stype == "detect_battle": append_log(f"加入戰鬥跳轉：若 {params['duration']}s 內無計時器則跳轉 {params['jump_value']} 步")
+            elif stype == "wait_battle_start": append_log(f"加入等待進入戰鬥：timeout={params['timeout']}s, 超時跳={params['on_timeout_jump']}")
+            elif stype == "wait_battle_end": append_log(f"加入等待戰鬥結束：timeout={params['timeout']}s, 超時跳={params['on_timeout_jump']}")
+
+    def update_adv_step():
+        selected = adv_tree.selection()
+        if not selected:
+            messagebox.showwarning("提示", "請先從清單選中一個要更新的步驟")
+            return
+        index = adv_tree.index(selected[0])
+        stype, params = get_adv_step_from_ui()
+        if stype:
+            adv_player.steps[index] = {"type": stype, "params": params}
+            update_adv_list()
+            append_log(f"✓ 已更新第 {index+1} 步 ({stype})")
+
+    def import_adv_script():
+        path = filedialog.askopenfilename(
+            title="選擇進階腳本檔案", 
+            initialdir="scripts",
+            filetypes=[("JSON 檔案", "*.json"), ("全部檔案", "*.*")]
+        )
+        if not path: return
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "steps" in data:
+                adv_player.steps = data["steps"]
+            elif isinstance(data, list):
+                adv_player.steps = data
+            else:
+                messagebox.showerror("錯誤", "不支援的腳本格式")
+                return
+            update_adv_list()
+            append_log(f"✓ 已匯入進階腳本: {os.path.basename(path)} ({len(adv_player.steps)} 步)")
+        except Exception as e:
+            messagebox.showerror("錯誤", f"匯入失敗: {e}")
+
+    def load_step_to_edit_ui():
+        selected = adv_tree.selection()
+        if not selected: return
+        index = adv_tree.index(selected[0])
+        step = adv_player.steps[index]
+        stype = step['type']
+        params = step['params']
+        
+        type_map = {
+            "click": "點擊 (Click)",
+            "swipe": "滑動 (Swipe)",
+            "wait": "等候 (Wait)",
+            "find_click": "找圖點擊 (Find&Click)",
+            "find_jump": "找圖跳轉 (Find&Jump)",
+            "detect_battle": "偵測戰鬥 (Detect Battle)",
+            "wait_battle_start": "等待進入戰鬥 (Wait Battle Start)",
+            "wait_battle_end": "等待戰鬥結束 (Wait Battle End)",
+            "combat_skill": "戰鬥技能 (Combat Skill)"
+        }
+        
+        if stype in type_map:
+            adv_action_var.set(type_map[stype])
+            adv_x_var.delete(0, tk.END); adv_y_var.delete(0, tk.END)
+            adv_ex_var.delete(0, tk.END); adv_ey_var.delete(0, tk.END)
+            adv_img_path.set("")
             
-            adv_player.add_step("detect_battle", {
-                "duration": duration,
-                "jump_value": jump_val,
-                "mode": mode
-            })
-            append_log(f"加入戰鬥跳轉：若 {duration}s 內無計時器則跳轉 {jump_val} 步")
-
-        elif action == "等待進入戰鬥 (Wait Battle Start)":
-            # X欄 = timeout 秒, Y欄 = 超時跳轉步數, EX欄 = 超時是否跳(Y/N)
-            try: timeout = float(adv_x_var.get()) if adv_x_var.get() else 60
-            except: timeout = 60
-            try: jump_val = int(adv_y_var.get()) if adv_y_var.get() else 0
-            except: jump_val = 0
-            on_timeout = adv_ex_var.get().upper() == 'Y'
-            adv_player.add_step("wait_battle_start", {
-                "timeout": timeout,
-                "poll_interval": 0.5,
-                "on_timeout_jump": on_timeout,
-                "jump_value": jump_val
-            })
-            append_log(f"加入等待進入戰鬥：timeout={timeout}s, 超時跳={on_timeout}")
-
-        elif action == "等待戰鬥結束 (Wait Battle End)":
-            # X欄 = timeout 秒, Y欄 = 超時跳轉步數, EX欄 = 超時是否跳(Y/N)
-            try: timeout = float(adv_x_var.get()) if adv_x_var.get() else 300
-            except: timeout = 300
-            try: jump_val = int(adv_y_var.get()) if adv_y_var.get() else 0
-            except: jump_val = 0
-            on_timeout = adv_ex_var.get().upper() == 'Y'
-            adv_player.add_step("wait_battle_end", {
-                "timeout": timeout,
-                "poll_interval": 1.0,
-                "on_timeout_jump": on_timeout,
-                "jump_value": jump_val
-            })
-            append_log(f"加入等待戰鬥結束：timeout={timeout}s, 超時跳={on_timeout}")
-        
-        update_adv_list()
+            if stype == "click":
+                adv_x_var.insert(0, str(params.get('x', '')))
+                adv_y_var.insert(0, str(params.get('y', '')))
+            elif stype == "swipe":
+                adv_x_var.insert(0, str(params.get('s_x', '')))
+                adv_y_var.insert(0, str(params.get('s_y', '')))
+                adv_ex_var.insert(0, str(params.get('e_x', '')))
+                adv_ey_var.insert(0, str(params.get('e_y', '')))
+            elif stype == "wait":
+                adv_x_var.insert(0, str(params.get('seconds', '')))
+            elif stype == "find_click":
+                adv_img_path.set(params.get('template', ''))
+                adv_ex_var.insert(0, str(params.get('threshold', '0.7')))
+            elif stype == "find_jump":
+                adv_img_path.set(params.get('template', ''))
+                adv_x_var.insert(0, str(params.get('threshold', '0.7')))
+                adv_y_var.insert(0, str(params.get('jump_value', '0')))
+                adv_ex_var.insert(0, 'A' if params.get('mode') == 'absolute' else 'R')
+                adv_ey_var.insert(0, 'N' if params.get('condition') == 'if_not_found' else 'F')
+            elif stype == "detect_battle":
+                adv_x_var.insert(0, str(params.get('duration', '2.0')))
+                adv_y_var.insert(0, str(params.get('jump_value', '0')))
+                adv_ex_var.insert(0, 'A' if params.get('mode') == 'absolute' else 'R')
+            elif stype in ("wait_battle_start", "wait_battle_end"):
+                adv_x_var.insert(0, str(params.get('timeout', '')))
+                adv_y_var.insert(0, str(params.get('jump_value', '0')))
+                adv_ex_var.insert(0, 'Y' if params.get('on_timeout_jump') else 'N')
+            elif stype == "combat_skill":
+                adv_x_var.insert(0, params.get('preset_file', ''))
+                adv_y_var.insert(0, params.get('set_name', ''))
+            
+            append_log(f"已回填步驟 {index + 1} 參數")
 
     def update_adv_list():
         adv_tree.delete(*adv_tree.get_children())
@@ -464,7 +521,7 @@ def main():
     play_btn = tk.Button(f_ctrl, text="開始播放", command=start_play, bg="#4CAF50", fg="white", width=12); play_btn.grid(row=0, column=2, padx=5)
     stop_play_btn = tk.Button(f_ctrl, text="停止播放", command=stop_play, bg="#F44336", fg="white", width=12, state="disabled"); stop_play_btn.grid(row=0, column=3, padx=5)
 
-    tab2 = tk.Frame(nb); nb.add(tab2, text=" 進階功能 (手動配置) ")
+    tab2 = tk.Frame(nb); nb.add(tab2, text=" 進階設定 (手動配置) ")
     f_adv_edit = tk.LabelFrame(tab2, text="新增動作步驟"); f_adv_edit.pack(fill="x", padx=10, pady=5)
     adv_action_var = tk.StringVar(value="點擊 (Click)")
     cb_act = ttk.Combobox(f_adv_edit, textvariable=adv_action_var, values=[
@@ -495,7 +552,8 @@ def main():
     tk.Button(f_adv_edit, text="截取圖", command=pick_image, bg="#673AB7", fg="white").grid(row=2, column=4, padx=5)
     tk.Button(f_adv_edit, text="自選圖", command=select_adv_image).grid(row=2, column=5, padx=5)
 
-    tk.Button(f_adv_edit, text="加入步驟", command=add_adv_step, bg="#2196F3", fg="white", width=12).grid(row=0, column=6, rowspan=2, padx=10)
+    tk.Button(f_adv_edit, text="加入步驟", command=add_adv_step, bg="#2196F3", fg="white", width=12).grid(row=0, column=6, padx=10)
+    tk.Button(f_adv_edit, text="更新選中", command=update_adv_step, bg="#FF9800", fg="white", width=12).grid(row=1, column=6, padx=10)
     tk.Button(f_adv_edit, text="清空清單", command=clear_adv_steps, width=12).grid(row=2, column=6, padx=10)
 
     f_adv_list = tk.LabelFrame(tab2, text="目前腳本步驟"); f_adv_list.pack(fill="both", expand=True, padx=10, pady=5)
@@ -513,12 +571,14 @@ def main():
     side_btns.pack(side="right", fill="y", padx=5)
     tk.Button(side_btns, text="▲ 移上", command=move_step_up, width=8).pack(pady=2)
     tk.Button(side_btns, text="▼ 移下", command=move_step_down, width=8).pack(pady=2)
+    tk.Button(side_btns, text="載入編輯", command=load_step_to_edit_ui, bg="#607D8B", fg="white", width=8).pack(pady=2)
     tk.Button(side_btns, text="刪除步驟", command=delete_selected_step, bg="#F44336", fg="white", width=8).pack(pady=10)
 
     f_adv_ctrl = tk.Frame(tab2); f_adv_ctrl.pack(fill="x", padx=10, pady=5)
-    tk.Button(f_adv_ctrl, text="儲存為腳本 (產出)", command=save_adv_script, bg="#673AB7", fg="white", height=2, width=20).pack(side="left", padx=5)
-    tk.Button(f_adv_ctrl, text="開始測試執行", command=start_adv_play, bg="#4CAF50", fg="white", height=2, width=20).pack(side="left", padx=5)
-    tk.Button(f_adv_ctrl, text="停止執行", command=stop_adv_play, bg="#F44336", fg="white", height=2, width=20).pack(side="left", padx=5)
+    tk.Button(f_adv_ctrl, text="儲存為腳本 (產出)", command=save_adv_script, bg="#673AB7", fg="white", height=2, width=18).pack(side="left", padx=5)
+    tk.Button(f_adv_ctrl, text="匯入腳本 (載入)", command=import_adv_script, bg="#008CBA", fg="white", height=2, width=18).pack(side="left", padx=5)
+    tk.Button(f_adv_ctrl, text="開始測試執行", command=start_adv_play, bg="#4CAF50", fg="white", height=2, width=18).pack(side="left", padx=5)
+    tk.Button(f_adv_ctrl, text="停止執行", command=stop_adv_play, bg="#F44336", fg="white", height=2, width=18).pack(side="left", padx=5)
 
     # ═══════════════════════════════════════════════════════
     # Tab 3: 預設技能

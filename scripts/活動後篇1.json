@@ -5,19 +5,19 @@
       "type": "find_click",
       "params": {
         "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774511103.png",
-        "threshold": 0.7
+        "threshold": 0.5
       }
     },
     {
       "type": "wait",
       "params": {
-        "seconds": 5.0
+        "seconds": 4.0
       }
     },
     {
       "type": "detect_battle",
       "params": {
-        "duration": 3.0,
+        "duration": 1.0,
         "jump_value": -2,
         "mode": "relative"
       }
@@ -32,20 +32,20 @@
       "type": "find_click",
       "params": {
         "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774511273.png",
-        "threshold": 0.6
+        "threshold": 0.5
       }
     },
     {
       "type": "wait",
       "params": {
-        "seconds": 3.0
+        "seconds": 4.0
       }
     },
     {
-      "type": "find_click",
+      "type": "combat_skill",
       "params": {
-        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774511345.png",
-        "threshold": 0.6
+        "preset_file": "技能預設.json",
+        "set_name": "日常"
       }
     }
   ]
