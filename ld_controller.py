@@ -134,14 +134,17 @@ def send_key(hwnd, key_code):
     win32gui.PostMessage(target_hwnd, win32con.WM_KEYUP, key_code, 0)
 
 def get_window_screenshot(hwnd):
-    """抓取視窗截圖並回傳 PIL Image"""
+    """抓取視窗截圖並回傳 PIL Image (自動鎖定內部遊戲畫面)"""
     try:
-        # 獲取視窗客戶區寬高
-        rect = win32gui.GetClientRect(hwnd)
+        # 自動尋找內部的 RenderWindow，排除模擬器邊框與標籤欄
+        target_hwnd = find_sub_window(hwnd)
+        
+        # 獲取目標區域寬高
+        rect = win32gui.GetClientRect(target_hwnd)
         w = rect[2] - rect[0]
         h = rect[3] - rect[1]
 
-        hwndDC = win32gui.GetWindowDC(hwnd)
+        hwndDC = win32gui.GetWindowDC(target_hwnd)
         mfcDC  = win32ui.CreateDCFromHandle(hwndDC)
         saveDC = mfcDC.CreateCompatibleDC()
 
@@ -167,7 +170,7 @@ def get_window_screenshot(hwnd):
         win32gui.DeleteObject(saveBitMap.GetHandle())
         saveDC.DeleteDC()
         mfcDC.DeleteDC()
-        win32gui.ReleaseDC(hwnd, hwndDC)
+        win32gui.ReleaseDC(target_hwnd, hwndDC)
         
         return im
     except Exception as e:

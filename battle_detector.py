@@ -1,0 +1,272 @@
+"""
+battle_detector.py
+------------------
+偵測遊戲是否已進入「戰鬥中」或「準備進入戰鬥」狀態。
+
+判斷依據（兩種模式）：
+  1. 右上角計時器  — 戰鬥中，右上角出現 "HH:MM:SS" 白色數字計時框
+  2. 底部提示文字  — 戰鬥前，畫面底部出現橘黃色 "タップ" 等提示文字
+
+偵測策略（不依賴 OCR，純顏色與亮度分析）：
+  - 計時器區域（右上角 ROI）：該區域存在白色像素群落，且佈局緊湊 → 計時器存在
+  - 底部提示區域（底部 ROI）：該區域橘黃色像素比例超過閾值 → 提示文字存在
+"""
+
+import cv2
+import numpy as np
+from ld_controller import get_window_screenshot
+
+
+# ─── 可調整的超參數 ──────────────────────────────────────────────
+# 計時器偵測：右上角 ROI (依據最新截圖微調)
+TIMER_ROI_LEFT   = 0.77   # 調回 0.77，確保時鐘圖標不被切掉
+TIMER_ROI_TOP    = 0.10   # 稍微往下對準黑色框
+TIMER_ROI_RIGHT  = 0.98
+TIMER_ROI_BOTTOM = 0.16   # 縮小高度，精確鎖讀時鐘圖標
+
+# 計時器：白色像素比例閾值（超過才算有計時器）
+TIMER_WHITE_RATIO_THRESHOLD  = 0.04  # 提高到 4%
+
+# 底部提示文字偵測：底部 ROI
+TEXT_ROI_LEFT   = 0.10
+TEXT_ROI_TOP    = 0.85
+TEXT_ROI_RIGHT  = 0.90
+TEXT_ROI_BOTTOM = 0.95
+
+# 橘黃色 HSV 範圍（"タップで戦"黃色文字）
+TEXT_HSV_LOWER = np.array([15,  120, 120], dtype=np.uint8)
+TEXT_HSV_UPPER = np.array([40,  255, 255], dtype=np.uint8)
+
+# 底部提示：橘黃色像素比例閾值
+TEXT_YELLOW_RATIO_THRESHOLD = 0.03  # 提高到 3%
+# ─────────────────────────────────────────────────────────────────
+
+
+def _crop_roi(img_bgr, left_r, top_r, right_r, bottom_r):
+    """根據比例裁切 BGR 圖片的 ROI"""
+    h, w = img_bgr.shape[:2]
+    x1, y1 = int(w * left_r),  int(h * top_r)
+    x2, y2 = int(w * right_r), int(h * bottom_r)
+    return img_bgr[y1:y2, x1:x2]
+
+
+def detect_timer(hwnd, log_fn=None) -> bool:
+    """
+    偵測計時器：黑底白字雙重判讀。
+    """
+    im = get_window_screenshot(hwnd)
+    if im is None: return False
+
+    img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+    roi = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_ROI_TOP, TIMER_ROI_RIGHT, TIMER_ROI_BOTTOM)
+
+    # 1. 偵測「黑底」(梯形背景)
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    lower_black = np.array([0, 0, 0])
+    upper_black = np.array([180, 255, 80]) # 亮度低於 80 視為黑色背景
+    black_mask = cv2.inRange(hsv, lower_black, upper_black)
+    black_ratio = np.count_nonzero(black_mask) / black_mask.size
+
+    # 2. 偵測「白字」(數字與時鐘)
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    _, white_mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+    white_ratio = np.count_nonzero(white_mask) / white_mask.size
+    
+    # 判定條件：黑底需佔一定比例，且白字比例也需達標
+    has_black = black_ratio >= 0.15 # 黑底至少 15%
+    has_white = white_ratio >= 0.01 # 白字至少 1%
+    is_detected = has_black and has_white
+    
+    if log_fn:
+        res_str = "✓ 戰鬥中" if is_detected else "× 非戰鬥"
+        log_fn(f"  [診斷] {res_str} (黑底:{black_ratio:.1%}, 白字:{white_ratio:.1%})")
+        
+    return is_detected
+
+
+def detect_prebattle_text(hwnd) -> bool:
+    """
+    偵測底部是否出現橘黃色戰前提示文字。
+    回傳 True 表示提示文字存在（即將進入戰鬥）。
+    """
+    im = get_window_screenshot(hwnd)
+    if im is None:
+        return False
+
+    img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+    roi = _crop_roi(img_bgr, TEXT_ROI_LEFT, TEXT_ROI_TOP,
+                    TEXT_ROI_RIGHT, TEXT_ROI_BOTTOM)
+
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    yellow_mask = cv2.inRange(hsv, TEXT_HSV_LOWER, TEXT_HSV_UPPER)
+    yellow_ratio = np.count_nonzero(yellow_mask) / yellow_mask.size
+
+    return yellow_ratio >= TEXT_YELLOW_RATIO_THRESHOLD
+
+
+def _find_image_in_roi(roi_bgr, template_path, threshold=0.7, log_fn=None):
+    """在截取的 ROI 中精確尋找圖片"""
+    import cv2
+    import numpy as np
+    try:
+        if not os.path.exists(template_path): return False
+        template = cv2.imdecode(np.fromfile(template_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if template is None: return False
+        
+        result = cv2.matchTemplate(roi_bgr, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, _ = cv2.minMaxLoc(result)
+        
+        if log_fn:
+            log_fn(f"  [診斷] 區域圖標比對: 分數={max_val:.3f}, 閾值={threshold:.2f}")
+        return max_val >= threshold
+    except:
+        return False
+
+def is_in_battle(hwnd, duration=2.0, log_fn=None) -> bool:
+    """
+    戰鬥判定：結合 ROI 圖標比對與顏色算法。
+    """
+    import os
+    import time
+    
+    timer_path = "scripts/advanced/assets/timer.png"
+    check_start = time.time()
+    
+    if log_fn:
+        log_fn(f"📖 開始戰鬥判定診斷 (時長: {duration}s)...")
+        
+    while time.time() - check_start < float(duration):
+        im = get_window_screenshot(hwnd)
+        if im:
+            img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+            roi = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_ROI_TOP, TIMER_ROI_RIGHT, TIMER_ROI_BOTTOM)
+            
+            # --- 1. 優先：區域圖標比對 (最準確) ---
+            if os.path.exists(timer_path):
+                if _find_image_in_roi(roi, timer_path, threshold=0.70, log_fn=log_fn):
+                    return True
+            
+            # --- 2. 備案：強化版顏色判斷 ---
+            # 偵測「極黑底」
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            black_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 255, 60]))
+            black_ratio = np.count_nonzero(black_mask) / black_mask.size
+            
+            # 偵測「白字」
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            _, white_mask = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY)
+            white_ratio = np.count_nonzero(white_mask) / white_mask.size
+            
+            # 大地圖的區域條通常黑色佔比稍低，且白字較大
+            # 我們提高黑底門檻至 22%，白字門檻 2%~8%
+            is_color_match = (black_ratio >= 0.22) and (0.015 <= white_ratio <= 0.10)
+            
+            if log_fn:
+                 res_str = "✓ 顏色符合" if is_color_match else "× 顏色不符"
+                 log_fn(f"  [診斷] {res_str} (黑底:{black_ratio:.1%}, 白字:{white_ratio:.1%})")
+            
+            if is_color_match:
+                return True
+        
+        time.sleep(0.3)
+        
+    return False
+
+
+def is_prebattle(hwnd) -> bool:
+    """
+    綜合判斷：底部提示文字出現 → 戰鬥即將開始（等待點擊）
+    """
+    return detect_prebattle_text(hwnd)
+
+
+def get_battle_state(hwnd) -> str:
+    """
+    回傳目前戰鬥狀態字串：
+      'in_battle'   — 計時器存在，戰鬥進行中
+      'pre_battle'  — 底部文字存在，準備進入戰鬥
+      'none'        — 非戰鬥狀態
+    """
+    if is_in_battle(hwnd):
+        return "in_battle"
+    if is_prebattle(hwnd):
+        return "pre_battle"
+    return "none"
+
+
+def wait_for_battle_start(hwnd, timeout=60.0, poll_interval=0.5, log_fn=None) -> bool:
+    """
+    等待直到進入戰鬥（計時器出現）或超時。
+    :param hwnd: 模擬器視窗句柄
+    :param timeout: 最長等待秒數（預設 60）
+    :param poll_interval: 每次輪詢間隔（秒）
+    :param log_fn: 日誌回呼函數
+    :return: True 表示已進入戰鬥；False 表示超時
+    """
+    import time
+    elapsed = 0.0
+    while elapsed < timeout:
+        state = get_battle_state(hwnd)
+        if log_fn:
+            log_fn(f"  🔍 戰鬥偵測: {state} ({elapsed:.1f}s)")
+        if state == "in_battle":
+            return True
+        if state == "pre_battle":
+            if log_fn:
+                log_fn("  ⚔️ 偵測到戰前提示，等待計時器出現...")
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+    if log_fn:
+        log_fn(f"  ⚠️ 等待戰鬥開始超時 ({timeout}s)")
+    return False
+
+
+def wait_for_battle_end(hwnd, timeout=300.0, poll_interval=1.0, log_fn=None) -> bool:
+    """
+    等待直到計時器消失（戰鬥結束）或超時。
+    :return: True 表示戰鬥已結束；False 表示超時
+    """
+    import time
+    elapsed = 0.0
+    while elapsed < timeout:
+        if not is_in_battle(hwnd):
+            if log_fn:
+                log_fn(f"  ✅ 戰鬥結束偵測成功 ({elapsed:.1f}s)")
+            return True
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+    if log_fn:
+        log_fn(f"  ⚠️ 等待戰鬥結束超時 ({timeout}s)")
+    return False
+
+
+def debug_snapshot(hwnd, save_dir="scripts/advanced/assets"):
+    """
+    除錯用：截圖並標記計時器 ROI 與文字 ROI，儲存到磁碟。
+    """
+    import os, time as _time
+    im = get_window_screenshot(hwnd)
+    if im is None:
+        print("截圖失敗")
+        return
+
+    img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+    h, w = img_bgr.shape[:2]
+
+    # 畫計時器 ROI（藍色）
+    cv2.rectangle(img_bgr,
+                  (int(w * TIMER_ROI_LEFT),  int(h * TIMER_ROI_TOP)),
+                  (int(w * TIMER_ROI_RIGHT),  int(h * TIMER_ROI_BOTTOM)),
+                  (255, 0, 0), 2)
+
+    # 畫文字 ROI（橘色）
+    cv2.rectangle(img_bgr,
+                  (int(w * TEXT_ROI_LEFT),   int(h * TEXT_ROI_TOP)),
+                  (int(w * TEXT_ROI_RIGHT),   int(h * TEXT_ROI_BOTTOM)),
+                  (0, 128, 255), 2)
+
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, f"battle_debug_{int(_time.time())}.png")
+    cv2.imwrite(path, img_bgr)
+    print(f"除錯截圖已儲存: {path}")
+    return path

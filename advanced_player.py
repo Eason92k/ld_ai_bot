@@ -5,6 +5,9 @@ import threading
 import cv2
 import numpy as np
 from ld_controller import send_click, send_swipe, get_window_screenshot
+from battle_detector import (
+    is_in_battle, get_battle_state, wait_for_battle_start, wait_for_battle_end, debug_snapshot
+)
 
 class AdvancedActionPlayer:
     def __init__(self):
@@ -26,7 +29,15 @@ class AdvancedActionPlayer:
 
     def add_step(self, action_type, params):
         """
-        action_type: 'click', 'swipe', 'wait', 'find_click'
+        action_type:
+          'click'            — 點擊 (x, y)
+          'swipe'            — 滑動 (s_x, s_y, e_x, e_y)
+          'wait'             — 等待 seconds 秒
+          'find_click'       — 找圖點擊
+          'find_jump'        — 找圖跳轉
+          'detect_battle'    — 偵測戰鬥狀態並依據結果跳轉
+          'wait_battle_start'— 等待進入戰鬥（計時器出現）
+          'wait_battle_end'  — 等待戰鬥結束（計時器消失）
         params: dict of parameters
         """
         self.steps.append({
@@ -143,7 +154,85 @@ class AdvancedActionPlayer:
                     return target_idx
                 else:
                     self.log(f"    × 未達成跳轉條件，繼續下一步")
-        
+
+        # ── 偵測戰鬥：判定是否有計時器，若無則執行跳轉 ───────────────
+        elif action_type == "detect_battle":
+            # params 結構：
+            #   duration:     判定持續時間 (秒)
+            #   jump_value:   步數
+            #   mode:         'relative' | 'absolute'
+            duration     = params.get('duration', 2.0)
+            jump_val     = params.get('jump_value', 0)
+            mode         = params.get('mode', 'relative')
+
+            if target_hwnds:
+                main_hwnd = target_hwnds[0]
+                # 執行持續偵測
+                in_battle = is_in_battle(main_hwnd, duration=duration)
+                
+                # 如果判定「不在戰鬥中」，就執行跳轉
+                if not in_battle:
+                    if mode == 'relative':
+                         target_idx = current_index + jump_val
+                    else:
+                        target_idx = jump_val - 1
+                    target_idx = max(0, min(target_idx, len(self.steps)))
+                    
+                    self.log(f"  ➜ 戰鬥判定：非戰鬥中 (判定時長: {duration}s) -> 跳轉至步驟 {target_idx + 1}")
+                    return target_idx
+                else:
+                    self.log(f"    ✓ 戰鬥中，繼續執行後續指令")
+
+        # ── 等待進入戰鬥 ─────────────────────────────────────────────
+        elif action_type == "wait_battle_start":
+            # params 結構：
+            #   timeout:       最長等候秒數（預設 60）
+            #   poll_interval: 輪詢間隔（預設 0.5）
+            #   on_timeout_jump: 超時是否跳轉（True/False，預設 False）
+            #   jump_value:    超時時跳轉步數（相對）
+            timeout       = params.get('timeout', 60)
+            poll_interval = params.get('poll_interval', 0.5)
+            on_timeout_jump = params.get('on_timeout_jump', False)
+            jump_val      = params.get('jump_value', 0)
+
+            if target_hwnds:
+                self.log(f"  ➜ 等待進入戰鬥（最多 {timeout}s）...")
+                success = wait_for_battle_start(
+                    target_hwnds[0],
+                    timeout=timeout,
+                    poll_interval=poll_interval,
+                    log_fn=self.log
+                )
+                if not success and on_timeout_jump and jump_val != 0:
+                    target_idx = max(0, min(current_index + jump_val, len(self.steps)))
+                    self.log(f"    ⏱ 超時跳轉至步驟 {target_idx + 1}")
+                    return target_idx
+
+        # ── 等待戰鬥結束 ─────────────────────────────────────────────
+        elif action_type == "wait_battle_end":
+            # params 結構：
+            #   timeout:       最長等候秒數（預設 300）
+            #   poll_interval: 輪詢間隔（預設 1.0）
+            #   on_timeout_jump: 超時是否跳轉
+            #   jump_value:    超時時跳轉步數（相對）
+            timeout         = params.get('timeout', 300)
+            poll_interval   = params.get('poll_interval', 1.0)
+            on_timeout_jump = params.get('on_timeout_jump', False)
+            jump_val        = params.get('jump_value', 0)
+
+            if target_hwnds:
+                self.log(f"  ➜ 等待戰鬥結束（最多 {timeout}s）...")
+                success = wait_for_battle_end(
+                    target_hwnds[0],
+                    timeout=timeout,
+                    poll_interval=poll_interval,
+                    log_fn=self.log
+                )
+                if not success and on_timeout_jump and jump_val != 0:
+                    target_idx = max(0, min(current_index + jump_val, len(self.steps)))
+                    self.log(f"    ⏱ 超時跳轉至步驟 {target_idx + 1}")
+                    return target_idx
+
         return None
 
     def find_image(self, hwnd, template_path, threshold=0.7):

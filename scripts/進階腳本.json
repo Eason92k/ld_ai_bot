@@ -1,0 +1,52 @@
+{
+  "type": "advanced",
+  "steps": [
+    {
+      "type": "find_click",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774511103.png",
+        "threshold": 0.7
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 5.0
+      }
+    },
+    {
+      "type": "detect_battle",
+      "params": {
+        "duration": 3.0,
+        "jump_value": -2,
+        "mode": "relative"
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 3.0
+      }
+    },
+    {
+      "type": "find_click",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774511273.png",
+        "threshold": 0.6
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 3.0
+      }
+    },
+    {
+      "type": "find_click",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774511345.png",
+        "threshold": 0.6
+      }
+    }
+  ]
+}

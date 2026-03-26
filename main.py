@@ -185,6 +185,54 @@ def main():
                     "condition": condition
                 })
             except: return
+
+        elif action == "偵測戰鬥 (Detect Battle)":
+            # X欄 = 判定時長(秒), Y欄 = 跳轉步數, EX欄 = 模式(R/A)
+            try:
+                duration = float(adv_x_var.get()) if adv_x_var.get() else 2.0
+            except: duration = 2.0
+            try:
+                jump_val = int(adv_y_var.get() if adv_y_var.get() else "0")
+            except: jump_val = 0
+            mode_str = adv_ex_var.get().upper()
+            mode = 'absolute' if mode_str == 'A' else 'relative'
+            
+            adv_player.add_step("detect_battle", {
+                "duration": duration,
+                "jump_value": jump_val,
+                "mode": mode
+            })
+            append_log(f"加入戰鬥跳轉：若 {duration}s 內無計時器則跳轉 {jump_val} 步")
+
+        elif action == "等待進入戰鬥 (Wait Battle Start)":
+            # X欄 = timeout 秒, Y欄 = 超時跳轉步數, EX欄 = 超時是否跳(Y/N)
+            try: timeout = float(adv_x_var.get()) if adv_x_var.get() else 60
+            except: timeout = 60
+            try: jump_val = int(adv_y_var.get()) if adv_y_var.get() else 0
+            except: jump_val = 0
+            on_timeout = adv_ex_var.get().upper() == 'Y'
+            adv_player.add_step("wait_battle_start", {
+                "timeout": timeout,
+                "poll_interval": 0.5,
+                "on_timeout_jump": on_timeout,
+                "jump_value": jump_val
+            })
+            append_log(f"加入等待進入戰鬥：timeout={timeout}s, 超時跳={on_timeout}")
+
+        elif action == "等待戰鬥結束 (Wait Battle End)":
+            # X欄 = timeout 秒, Y欄 = 超時跳轉步數, EX欄 = 超時是否跳(Y/N)
+            try: timeout = float(adv_x_var.get()) if adv_x_var.get() else 300
+            except: timeout = 300
+            try: jump_val = int(adv_y_var.get()) if adv_y_var.get() else 0
+            except: jump_val = 0
+            on_timeout = adv_ex_var.get().upper() == 'Y'
+            adv_player.add_step("wait_battle_end", {
+                "timeout": timeout,
+                "poll_interval": 1.0,
+                "on_timeout_jump": on_timeout,
+                "jump_value": jump_val
+            })
+            append_log(f"加入等待戰鬥結束：timeout={timeout}s, 超時跳={on_timeout}")
         
         update_adv_list()
 
@@ -313,6 +361,12 @@ def main():
         elif action == "找圖跳轉 (Find&Jump)":
             adv_l1.config(text="精準度 (0.7):"); adv_l2.config(text="步數(正前負後):")
             adv_l3.config(text="模式 (R相對/A絕對):"); adv_l4.config(text="條件 (F有跳/N無跳):")
+        elif action == "偵測戰鬥 (Detect Battle)":
+            adv_l1.config(text="判定時長(秒):"); adv_l2.config(text="跳轉步數:")
+            adv_l3.config(text="模式 (R相對/A絕對):"); adv_l4.config(text="─")
+        elif action in ("等待進入戰鬥 (Wait Battle Start)", "等待戰鬥結束 (Wait Battle End)"):
+            adv_l1.config(text="逾時秒數:"); adv_l2.config(text="超時跳轉步數:")
+            adv_l3.config(text="超時是否跳 (Y/N):"); adv_l4.config(text="─")
 
     root = tk.Tk()
     root.title("LD AI Bot - 進階自動化版")
@@ -352,7 +406,13 @@ def main():
     tab2 = tk.Frame(nb); nb.add(tab2, text=" 進階功能 (手動配置) ")
     f_adv_edit = tk.LabelFrame(tab2, text="新增動作步驟"); f_adv_edit.pack(fill="x", padx=10, pady=5)
     adv_action_var = tk.StringVar(value="點擊 (Click)")
-    cb_act = ttk.Combobox(f_adv_edit, textvariable=adv_action_var, values=["點擊 (Click)", "滑動 (Swipe)", "等候 (Wait)", "找圖點擊 (Find&Click)", "找圖跳轉 (Find&Jump)"], state="readonly", width=18)
+    cb_act = ttk.Combobox(f_adv_edit, textvariable=adv_action_var, values=[
+        "點擊 (Click)", "滑動 (Swipe)", "等候 (Wait)",
+        "找圖點擊 (Find&Click)", "找圖跳轉 (Find&Jump)",
+        "偵測戰鬥 (Detect Battle)",
+        "等待進入戰鬥 (Wait Battle Start)",
+        "等待戰鬥結束 (Wait Battle End)",
+    ], state="readonly", width=24)
     cb_act.grid(row=0, column=0, padx=5, pady=5); adv_action_var.trace("w", update_adv_ui_labels)
 
     adv_l1 = tk.Label(f_adv_edit, text="X 座標:"); adv_l1.grid(row=0, column=1)
