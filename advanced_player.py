@@ -11,7 +11,7 @@ class AdvancedActionPlayer:
         self.steps = []
         self.playing = False
         self.log_callback = None
-        self.scripts_dir = "scripts/advanced"
+        self.scripts_dir = "scripts"
         if not os.path.exists(self.scripts_dir):
             os.makedirs(self.scripts_dir)
 
@@ -168,13 +168,36 @@ class AdvancedActionPlayer:
             self.log(f"  ⚠️ 圖片辨識發生錯誤: {e}")
         return None
 
-    def save_script(self, filename):
+    def save_script(self, filename=None):
+        if not filename:
+            base_name = "進階腳本"
+            ext = ".json"
+            target_path = os.path.join(self.scripts_dir, f"{base_name}{ext}")
+            
+            if os.path.exists(target_path):
+                counter = 1
+                while os.path.exists(os.path.join(self.scripts_dir, f"{base_name}{counter}{ext}")):
+                    counter += 1
+                target_path = os.path.join(self.scripts_dir, f"{base_name}{counter}{ext}")
+            
+            filename = os.path.basename(target_path)
+        
         if not filename.endswith(".json"):
             filename += ".json"
+            
         path = os.path.join(self.scripts_dir, filename)
+        
+        # 儲存為統一包裝格式
+        output = {
+            "type": "advanced",
+            "steps": self.steps
+        }
+        
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(self.steps, f, indent=2, ensure_ascii=False)
+            json.dump(output, f, indent=2, ensure_ascii=False)
+            
         self.log(f"✓ 進階腳本已儲存: {filename}")
+        return filename
 
     def load_script(self, filename):
         path = os.path.join(self.scripts_dir, filename)
@@ -182,6 +205,10 @@ class AdvancedActionPlayer:
             self.log(f"✗ 找不到腳本: {filename}")
             return False
         with open(path, 'r', encoding='utf-8') as f:
-            self.steps = json.load(f)
+            data = json.load(f)
+            if isinstance(data, dict) and "steps" in data:
+                self.steps = data["steps"]
+            else:
+                self.steps = data
         self.log(f"✓ 已載入進階腳本: {filename} ({len(self.steps)} 個步驟)")
         return True

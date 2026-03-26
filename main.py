@@ -86,24 +86,61 @@ def main():
         try:
             repeat = int(repeat_var.get())
         except: repeat = 1
-        player.filename = filename
-        if not player.load(): return
-        status_var.set("播放中...")
-        play_btn.config(state="disabled")
-        stop_play_btn.config(state="normal")
-        def run_play():
-            player.play(repeat=repeat, target_windows=selected_info)
-            status_var.set("已完成" if player.playing else "已停止")
-            play_btn.config(state="normal")
-            stop_play_btn.config(state="disabled")
-        threading.Thread(target=run_play, daemon=True).start()
+        # 嘗試讀取並判斷類型
+        import json
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            is_advanced = isinstance(data, dict) and data.get("type") == "advanced"
+        except:
+            is_advanced = False
+
+        if is_advanced:
+            # 執行進階腳本播放
+            adv_player.steps = data.get("steps", [])
+            status_var.set("進階播放中...")
+            play_btn.config(state="disabled")
+            stop_play_btn.config(state="normal")
+            def run_adv_play():
+                adv_player.play(target_windows=selected_info, repeat=repeat)
+                status_var.set("已完成" if adv_player.playing else "已停止")
+                play_btn.config(state="normal")
+                stop_play_btn.config(state="disabled")
+            threading.Thread(target=run_adv_play, daemon=True).start()
+        else:
+            # 傳統播放
+            player.filename = filename
+            if not player.load(): return
+            status_var.set("播放中...")
+            play_btn.config(state="disabled")
+            stop_play_btn.config(state="normal")
+            def run_play():
+                player.play(repeat=repeat, target_windows=selected_info)
+                status_var.set("已完成" if player.playing else "已停止")
+                play_btn.config(state="normal")
+                stop_play_btn.config(state="disabled")
+            threading.Thread(target=run_play, daemon=True).start()
 
     def stop_play():
         if player.playing:
             player.playing = False
             status_var.set("已停止")
+        if adv_player.playing:
+            adv_player.playing = False
+            status_var.set("已停止")
 
     # Advanced Functions
+    def save_adv_script():
+        if not adv_player.steps:
+            messagebox.showwarning("警告", "目前的腳本清單是空的")
+            return
+        filename = adv_player.save_script()
+        update_script_list(auto_select=False)
+        # 自動切換到基本分頁並選中該腳本 (選選方式)
+        nb.select(0)
+        script_combo.set(filename)
+        filename_var.set(os.path.join("scripts", filename))
+        append_log(f"✓ 已產出腳本並切換至基本功能: {filename}")
     def add_adv_step():
         action = adv_action_var.get()
         if action == "點擊 (Click)":
@@ -356,7 +393,8 @@ def main():
     tk.Button(side_btns, text="刪除步驟", command=delete_selected_step, bg="#F44336", fg="white", width=8).pack(pady=10)
 
     f_adv_ctrl = tk.Frame(tab2); f_adv_ctrl.pack(fill="x", padx=10, pady=5)
-    tk.Button(f_adv_ctrl, text="開始執行進階腳本", command=start_adv_play, bg="#4CAF50", fg="white", height=2, width=20).pack(side="left", padx=5)
+    tk.Button(f_adv_ctrl, text="儲存為腳本 (產出)", command=save_adv_script, bg="#673AB7", fg="white", height=2, width=20).pack(side="left", padx=5)
+    tk.Button(f_adv_ctrl, text="開始測試執行", command=start_adv_play, bg="#4CAF50", fg="white", height=2, width=20).pack(side="left", padx=5)
     tk.Button(f_adv_ctrl, text="停止執行", command=stop_adv_play, bg="#F44336", fg="white", height=2, width=20).pack(side="left", padx=5)
 
     f_shared = tk.Frame(root); f_shared.pack(fill="x", padx=15, pady=5)
