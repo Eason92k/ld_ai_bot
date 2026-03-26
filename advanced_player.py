@@ -8,12 +8,14 @@ from ld_controller import send_click, send_swipe, get_window_screenshot
 from battle_detector import (
     is_in_battle, get_battle_state, wait_for_battle_start, wait_for_battle_end, debug_snapshot
 )
+from skill_preset import SkillPresetParser, load_preset
 
 class AdvancedActionPlayer:
-    def __init__(self):
+    def __init__(self, skill_player=None):
         self.steps = []
         self.playing = False
         self.log_callback = None
+        self.skill_player = skill_player
         self.scripts_dir = "scripts"
         if not os.path.exists(self.scripts_dir):
             os.makedirs(self.scripts_dir)
@@ -232,6 +234,41 @@ class AdvancedActionPlayer:
                     target_idx = max(0, min(current_index + jump_val, len(self.steps)))
                     self.log(f"    ⏱ 超時跳轉至步驟 {target_idx + 1}")
                     return target_idx
+
+        # ── 執行預設技能組 ──
+        elif action_type == "combat_skill":
+            # params 結構：
+            #   preset_file: 預設檔名
+            #   set_name:    套組名稱 (@名稱)
+            preset_file = params.get('preset_file')
+            set_name    = params.get('set_name')
+            
+            if self.skill_player and target_hwnds:
+                self.log(f"  ➜ 執行預設技能：檔案={preset_file}, 套組={set_name}")
+                # 載入預設
+                data = load_preset(preset_file)
+                if not data:
+                    self.log(f"    × 找不到預設檔: {preset_file}")
+                    return None
+                
+                # 解析套組
+                presets = SkillPresetParser.parse(data.get("skill_text", ""))
+                preset = next((p for p in presets if p['name'] == set_name), None)
+                
+                if not preset:
+                    self.log(f"    × 預設檔中找不到套組: {set_name}")
+                    return None
+                
+                # 執行技能 (skill_player.play 會在戰鬥結束後自動停止)
+                # 這裡需要同步執行，所以直接呼叫
+                # 先更新座標與設定
+                self.skill_player.set_positions(data.get("positions", {}))
+                self.skill_player.battle_only = True # 強制僅戰鬥中
+                self.skill_player.cast_interval = data.get("cast_interval", 0.3)
+                
+                # 執行一輪直到戰鬥結束
+                self.skill_player.play(target_windows, preset)
+                self.log(f"    ✓ 預設技能執行完畢（戰鬥結束或手動停止）")
 
         return None
 

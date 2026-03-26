@@ -1,0 +1,504 @@
+"""
+skill_preset.py
+---------------
+預設技能系統：解析文字指令語法，自動施放技能。
+
+語法規則：
+  @ 分套（獨立選擇）
+  : 分組（同組技能連續施放）
+  - 等待時間（該組施放後等待秒數）
+  1-6 底部武器技能槽
+  a-f 頂部角色/同伴技能
+
+範例：
+  剣姬123a45:4:4:4b
+  @狂怒-20:1a:12345-30:ef
+  @坦123a-10:2:2:2:245
+"""
+
+import json
+import time
+import os
+import re
+import cv2
+import numpy as np
+from ld_controller import send_click, get_window_screenshot
+from battle_detector import is_in_battle
+
+
+# ─── 所有合法的技能 ID ────────────────────────────────
+VALID_SKILL_IDS = set("123456abcdef")
+
+
+# ═══════════════════════════════════════════════════════
+# 1. 語法解析器
+# ═══════════════════════════════════════════════════════
+class SkillPresetParser:
+    """解析技能文字指令語法"""
+
+    @staticmethod
+    def parse(text: str) -> list:
+        """
+        解析完整文字，回傳多個套組。
+        
+        回傳格式:
+        [
+            {
+                "name": "剣姬",
+                "groups": [
+                    {"skills": ["1","2","3","a","4","5"], "wait": 0},
+                    {"skills": ["4"], "wait": 0},
+                    ...
+                ]
+            },
+            ...
+        ]
+        """
+        if not text or not text.strip():
+            return []
+
+        # 將換行合併，以 @ 分割套組
+        lines = text.strip().splitlines()
+        # 合併成一個字串，保留 @ 作為分隔符
+        merged = ""
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            merged += line
+
+        # 以 @ 分割
+        # 第一段不需要 @, 後續段以 @ 開頭
+        parts = re.split(r'@', merged)
+        
+        presets = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            preset = SkillPresetParser.parse_single_set(part)
+            if preset:
+                presets.append(preset)
+
+        return presets
+
+    @staticmethod
+    def parse_single_set(text: str) -> dict:
+        """
+        解析單一套組文字。
+        
+        範例: "剣姬123a45:4:4:4b"
+        → { "name": "剣姬", "groups": [...] }
+        """
+        text = text.strip()
+        if not text:
+            return None
+
+        # 分離名稱和技能指令
+        # 名稱 = 開頭的非技能字元（非 1-6, a-f, :, -,  數字）
+        name = ""
+        skill_part = text
+        
+        # 找到第一個技能字元或特殊符號的位置
+        for i, ch in enumerate(text):
+            if ch in VALID_SKILL_IDS or ch == ':' or ch == '-':
+                name = text[:i].strip()
+                skill_part = text[i:]
+                break
+        else:
+            # 整段都是名稱，沒有技能
+            name = text
+            skill_part = ""
+
+        if not name:
+            name = "未命名"
+
+        # 解析技能部分：以 : 分組
+        groups = []
+        if skill_part:
+            raw_groups = skill_part.split(':')
+            for raw_group in raw_groups:
+                raw_group = raw_group.strip()
+                if not raw_group:
+                    continue
+                group = SkillPresetParser._parse_group(raw_group)
+                groups.append(group)
+
+        return {"name": name, "groups": groups}
+
+    @staticmethod
+    def _parse_group(raw: str) -> dict:
+        """
+        解析單一組別。
+        
+        範例: "123a45" → {"skills": ["1","2","3","a","4","5"], "wait": 0}
+        範例: "12345-30" → {"skills": ["1","2","3","4","5"], "wait": 30}
+        範例: "-20" → {"skills": [], "wait": 20}
+        """
+        skills = []
+        wait = 0
+
+        # 尋找等待時間 (-數字)
+        wait_match = re.search(r'-(\d+(?:\.\d+)?)', raw)
+        if wait_match:
+            wait = float(wait_match.group(1))
+            # 移除等待部分，剩下的是技能字元
+            raw = raw[:wait_match.start()]
+
+        # 提取技能 ID
+        for ch in raw:
+            if ch in VALID_SKILL_IDS:
+                skills.append(ch)
+
+        return {"skills": skills, "wait": wait}
+
+    @staticmethod
+    def get_all_skill_ids(preset: dict) -> list:
+        """取得一個套組中所有用到的技能 ID（去重，保持順序）"""
+        seen = set()
+        result = []
+        for group in preset.get("groups", []):
+            for skill_id in group.get("skills", []):
+                if skill_id not in seen:
+                    seen.add(skill_id)
+                    result.append(skill_id)
+        return result
+
+    @staticmethod
+    def format_preview(preset: dict) -> str:
+        """產生人類可讀的預覽文字"""
+        lines = [f"套組：{preset['name']}"]
+        for i, group in enumerate(preset["groups"]):
+            skills_str = "→".join(group["skills"]) if group["skills"] else "(空)"
+            wait_str = f"  等待 {group['wait']}s" if group["wait"] > 0 else ""
+            lines.append(f"  組{i+1}: {skills_str}{wait_str}")
+        lines.append(f"  自動: 循環按亮起技能")
+        return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════
+# 2. CD 偵測器（亮度檢測）
+# ═══════════════════════════════════════════════════════
+class SkillCooldownDetector:
+    """透過截圖亮度偵測技能是否 CD 完畢"""
+
+    # 亮度閾值：超過此值視為「技能亮起」（可施放）
+    BRIGHTNESS_THRESHOLD = 120
+    # 裁切大小（技能圖標周圍的像素範圍）
+    CROP_SIZE = 25
+
+    def __init__(self, positions: dict = None):
+        """
+        positions: {"1": [x, y], "2": [x, y], ...}
+        """
+        self.positions = positions or {}
+
+    def is_skill_ready(self, hwnd, skill_id: str) -> bool:
+        """偵測指定技能是否亮起（CD 完畢，可施放）"""
+        if skill_id not in self.positions:
+            return True  # 沒有座標，預設可用
+
+        x, y = self.positions[skill_id]
+        im = get_window_screenshot(hwnd)
+        if im is None:
+            return False
+
+        img = np.array(im)
+        h, w = img.shape[:2]
+        size = self.CROP_SIZE
+
+        # 裁切技能槽區域
+        x1 = max(0, x - size)
+        y1 = max(0, y - size)
+        x2 = min(w, x + size)
+        y2 = min(h, y + size)
+
+        roi = img[y1:y2, x1:x2]
+        if roi.size == 0:
+            return False
+
+        # 轉灰階計算平均亮度
+        gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
+        avg_brightness = np.mean(gray)
+
+        return avg_brightness >= self.BRIGHTNESS_THRESHOLD
+
+    def get_ready_skills(self, hwnd, skill_ids: list) -> list:
+        """
+        一次截圖，批量檢測所有技能，回傳所有 CD 完畢的技能 ID。
+        （比逐一截圖效率更高）
+        """
+        im = get_window_screenshot(hwnd)
+        if im is None:
+            return []
+
+        img = np.array(im)
+        h, w = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        size = self.CROP_SIZE
+        ready = []
+
+        for skill_id in skill_ids:
+            if skill_id not in self.positions:
+                continue
+            x, y = self.positions[skill_id]
+            x1 = max(0, x - size)
+            y1 = max(0, y - size)
+            x2 = min(w, x + size)
+            y2 = min(h, y + size)
+
+            roi = gray[y1:y2, x1:x2]
+            if roi.size == 0:
+                continue
+
+            avg_brightness = np.mean(roi)
+            if avg_brightness >= self.BRIGHTNESS_THRESHOLD:
+                ready.append(skill_id)
+
+        return ready
+
+    def debug_brightness(self, hwnd, skill_ids: list, log_fn=None):
+        """除錯用：列出所有技能的亮度值"""
+        im = get_window_screenshot(hwnd)
+        if im is None:
+            if log_fn:
+                log_fn("  ⚠️ 截圖失敗")
+            return
+
+        img = np.array(im)
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        size = self.CROP_SIZE
+
+        for skill_id in skill_ids:
+            if skill_id not in self.positions:
+                continue
+            x, y = self.positions[skill_id]
+            x1 = max(0, x - size)
+            y1 = max(0, y - size)
+            x2 = min(img.shape[1], x + size)
+            y2 = min(img.shape[0], y + size)
+
+            roi = gray[y1:y2, x1:x2]
+            avg = np.mean(roi) if roi.size > 0 else 0
+            status = "✓ 亮" if avg >= self.BRIGHTNESS_THRESHOLD else "× 暗"
+            if log_fn:
+                log_fn(f"  技能 {skill_id}: 亮度={avg:.1f} {status}")
+
+
+# ═══════════════════════════════════════════════════════
+# 3. 技能施放引擎
+# ═══════════════════════════════════════════════════════
+class SkillPresetPlayer:
+    """
+    技能施放引擎
+    
+    Phase 1: 依序執行各組技能（按照語法定義的順序）
+    Phase 2: 自動循環模式（偵測亮度，按 CD 好的技能）
+    """
+
+    def __init__(self):
+        self.playing = False
+        self.log_callback = None
+        self.cd_detector = SkillCooldownDetector()
+        self.cast_interval = 0.3  # 每次施放之間的間隔
+        self.battle_only = True   # 僅戰鬥中施放
+
+    def log(self, message):
+        if self.log_callback:
+            try:
+                self.log_callback(message)
+            except Exception:
+                pass
+        else:
+            print(message)
+
+    def set_positions(self, positions: dict):
+        """設定技能座標"""
+        self.cd_detector.positions = positions
+
+    def play(self, target_windows, preset_data: dict):
+        """
+        主執行迴圈。
+        
+        target_windows: [(title, hwnd), ...]
+        preset_data: 解析後的單一套組 {"name": ..., "groups": [...]}
+        """
+        if not target_windows:
+            self.log("✗ 無目標視窗")
+            return
+        if not preset_data or not preset_data.get("groups"):
+            self.log("✗ 無技能資料")
+            return
+
+        self.playing = True
+        main_hwnd = target_windows[0][1]  # 使用第一個視窗
+        all_hwnds = [hwnd for _, hwnd in target_windows]
+        
+        name = preset_data.get("name", "未命名")
+        groups = preset_data["groups"]
+        all_skill_ids = SkillPresetParser.get_all_skill_ids(preset_data)
+
+        self.log(f"=== 開始技能預設：{name} ===")
+
+        # ── 等待戰鬥開始 ──
+        if self.battle_only:
+            self.log("⏳ 等待進入戰鬥...")
+            while self.playing:
+                if is_in_battle(main_hwnd, duration=1.0):
+                    self.log("⚔️ 偵測到戰鬥！開始施放技能")
+                    break
+                time.sleep(0.5)
+
+        if not self.playing:
+            return
+
+        # ── Phase 1: 依序執行組別 ──
+        self.log("── Phase 1: 依序施放 ──")
+        for i, group in enumerate(groups):
+            if not self.playing:
+                break
+            
+            # 戰鬥中檢測
+            if self.battle_only and not is_in_battle(main_hwnd, duration=0.5):
+                self.log("  ⚠️ 戰鬥結束，停止施放")
+                break
+
+            skills = group.get("skills", [])
+            wait_time = group.get("wait", 0)
+
+            if skills:
+                skills_str = "→".join(skills)
+                self.log(f"  組{i+1}: {skills_str}")
+                for skill_id in skills:
+                    if not self.playing:
+                        break
+                    # 每一招施放前也檢查一次
+                    if self.battle_only and not is_in_battle(main_hwnd, duration=0.3):
+                        break
+                    self._cast_skill(all_hwnds, skill_id)
+                    time.sleep(self.cast_interval)
+
+            if wait_time > 0 and self.playing:
+                self.log(f"  ⏸ 等待 {wait_time} 秒")
+                # 分段等待，方便中斷
+                waited = 0
+                while waited < wait_time and self.playing:
+                    # 等待期間也檢查
+                    if self.battle_only and not is_in_battle(main_hwnd, duration=0.5):
+                        break
+                    time.sleep(min(0.5, wait_time - waited))
+                    waited += 0.5
+
+        if not self.playing:
+            self.log("=== 技能預設已停止 ===")
+            return
+
+        # ── Phase 2: 自動循環 ──
+        self.log("── Phase 2: 自動循環（按亮起技能） ──")
+        # 按 1→2→3→4→5→6→a→b→c→d→e→f 的固定順序
+        cycle_order = [s for s in "123456abcdef" if s in all_skill_ids]
+        
+        if not cycle_order:
+            self.log("  ⚠️ 無技能可循環")
+            self.playing = False
+            return
+
+        self.log(f"  循環技能: {', '.join(cycle_order)}")
+
+        while self.playing:
+            # 戰鬥中檢測
+            if self.battle_only:
+                if not is_in_battle(main_hwnd, duration=0.5):
+                    self.log("  ⚠️ 戰鬥結束，停止施放")
+                    break
+
+            # 批量偵測哪些技能亮了
+            ready_skills = self.cd_detector.get_ready_skills(main_hwnd, cycle_order)
+
+            if ready_skills:
+                for skill_id in cycle_order:
+                    if not self.playing:
+                        break
+                    if skill_id in ready_skills:
+                        self._cast_skill(all_hwnds, skill_id)
+                        time.sleep(self.cast_interval)
+            else:
+                time.sleep(0.3)  # 沒有技能亮，短暫等待
+
+        self.playing = False
+        self.log("=== 技能預設執行完畢 ===")
+
+    def _cast_skill(self, hwnds, skill_id: str):
+        """施放一個技能：對所有視窗發送點擊"""
+        pos = self.cd_detector.positions.get(skill_id)
+        if not pos:
+            self.log(f"  ⚠️ 技能 {skill_id} 無座標")
+            return
+        x, y = pos
+        for hwnd in hwnds:
+            send_click(hwnd, x, y)
+
+    def stop(self):
+        """停止施放"""
+        self.playing = False
+
+
+# ═══════════════════════════════════════════════════════
+# 4. 預設檔案管理
+# ═══════════════════════════════════════════════════════
+PRESET_DIR = "scripts/skill_presets"
+
+
+def ensure_preset_dir():
+    if not os.path.exists(PRESET_DIR):
+        os.makedirs(PRESET_DIR)
+
+
+def save_preset(skill_text: str, positions: dict, 
+                battle_only: bool = True, cast_interval: float = 0.3,
+                filename: str = None) -> str:
+    """
+    儲存預設為 JSON。
+    回傳檔名。
+    """
+    ensure_preset_dir()
+    
+    if not filename:
+        base = "技能預設"
+        ext = ".json"
+        filename = f"{base}{ext}"
+        counter = 1
+        while os.path.exists(os.path.join(PRESET_DIR, filename)):
+            filename = f"{base}{counter}{ext}"
+            counter += 1
+
+    if not filename.endswith(".json"):
+        filename += ".json"
+
+    data = {
+        "skill_text": skill_text,
+        "positions": positions,
+        "battle_only": battle_only,
+        "cast_interval": cast_interval
+    }
+
+    path = os.path.join(PRESET_DIR, filename)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+    return filename
+
+
+def load_preset(filename: str) -> dict:
+    """載入預設 JSON。"""
+    path = os.path.join(PRESET_DIR, filename)
+    if not os.path.exists(path):
+        return None
+    with open(path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def list_presets() -> list:
+    """列出所有預設檔案"""
+    ensure_preset_dir()
+    return sorted([f for f in os.listdir(PRESET_DIR) if f.endswith(".json")])

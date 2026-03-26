@@ -4,6 +4,7 @@ from tkinter.scrolledtext import ScrolledText
 import time
 import threading
 import os
+import json
 import win32gui
 import win32api
 from pynput import mouse
@@ -11,11 +12,16 @@ from player import ActionPlayer
 from recorder import ActionRecorder
 from advanced_player import AdvancedActionPlayer
 from ld_controller import list_all_ldplayer_windows, get_window_screenshot
+from skill_preset import (
+    SkillPresetParser, SkillCooldownDetector, SkillPresetPlayer,
+    save_preset, load_preset, list_presets, PRESET_DIR, ensure_preset_dir
+)
 
 def main():
     player = ActionPlayer(filename="") 
     recorder = ActionRecorder()
-    adv_player = AdvancedActionPlayer()
+    skill_player = SkillPresetPlayer()
+    adv_player = AdvancedActionPlayer(skill_player=skill_player)
 
     def append_log(message):
         timestamp = time.strftime("%H:%M:%S")
@@ -29,6 +35,7 @@ def main():
     player.log_callback = append_log
     recorder.log_callback = append_log
     adv_player.log_callback = append_log
+    skill_player.log_callback = append_log
 
     def update_script_list(auto_select=True):
         scripts_dir = "scripts"
@@ -185,7 +192,14 @@ def main():
                     "condition": condition
                 })
             except: return
-
+        elif action == "戰鬥技能 (Combat Skill)":
+            # X欄 = 預設檔名, Y欄 = 套組名稱
+            p_file = adv_x_var.get().strip()
+            s_name = adv_y_var.get().strip()
+            if not p_file or not s_name: return
+            adv_player.add_step("combat_skill", {"preset_file": p_file, "set_name": s_name})
+            append_log(f"加入戰鬥技能：檔={p_file}, 套組={s_name}")
+        
         elif action == "偵測戰鬥 (Detect Battle)":
             # X欄 = 判定時長(秒), Y欄 = 跳轉步數, EX欄 = 模式(R/A)
             try:
@@ -344,6 +358,47 @@ def main():
                 return False
         mouse.Listener(on_click=on_click).start()
 
+    def select_combat_skill_dialog():
+        """彈出視窗讓用戶選擇已儲存的預設檔與套組"""
+        top = tk.Toplevel(root)
+        top.title("選擇戰鬥技能組")
+        top.geometry("300x200")
+        top.transient(root)
+        top.grab_set()
+
+        tk.Label(top, text="選擇預設檔案:").pack(pady=5)
+        files = list_presets()
+        file_var = tk.StringVar()
+        cb_file = ttk.Combobox(top, textvariable=file_var, values=files, state="readonly", width=30)
+        cb_file.pack(pady=5)
+
+        tk.Label(top, text="選擇套組 (@名稱):").pack(pady=5)
+        set_var = tk.StringVar()
+        cb_set = ttk.Combobox(top, textvariable=set_var, state="readonly", width=30)
+        cb_set.pack(pady=5)
+
+        def on_file_change(event):
+            fn = file_var.get()
+            data = load_preset(fn)
+            if data:
+                ps = SkillPresetParser.parse(data.get("skill_text", ""))
+                names = [p['name'] for p in ps]
+                cb_set['values'] = names
+                if names: cb_set.set(names[0])
+        
+        cb_file.bind("<<ComboboxSelected>>", on_file_change)
+        if files:
+            cb_file.set(files[0])
+            on_file_change(None)
+
+        def confirm():
+            if file_var.get() and set_var.get():
+                adv_x_var.delete(0, tk.END); adv_x_var.insert(0, file_var.get())
+                adv_y_var.delete(0, tk.END); adv_y_var.insert(0, set_var.get())
+                top.destroy()
+        
+        tk.Button(top, text="確定選擇", command=confirm, bg="#4CAF50", fg="white", width=15).pack(pady=15)
+
     def update_adv_ui_labels(*args):
         action = adv_action_var.get()
         if action == "點擊 (Click)":
@@ -367,6 +422,12 @@ def main():
         elif action in ("等待進入戰鬥 (Wait Battle Start)", "等待戰鬥結束 (Wait Battle End)"):
             adv_l1.config(text="逾時秒數:"); adv_l2.config(text="超時跳轉步數:")
             adv_l3.config(text="超時是否跳 (Y/N):"); adv_l4.config(text="─")
+        elif action == "戰鬥技能 (Combat Skill)":
+            adv_l1.config(text="預設檔名(JSON):"); adv_l2.config(text="套組名稱(@名稱):")
+            adv_l3.config(text="─"); adv_l4.config(text="─")
+            btn_pick.config(text="選取技能", command=select_combat_skill_dialog, bg="#9C27B0")
+        else:
+            btn_pick.config(text="拾取點", command=pick_coordinate, bg="#E91E63")
 
     root = tk.Tk()
     root.title("LD AI Bot - 進階自動化版")
@@ -412,6 +473,7 @@ def main():
         "偵測戰鬥 (Detect Battle)",
         "等待進入戰鬥 (Wait Battle Start)",
         "等待戰鬥結束 (Wait Battle End)",
+        "戰鬥技能 (Combat Skill)",
     ], state="readonly", width=24)
     cb_act.grid(row=0, column=0, padx=5, pady=5); adv_action_var.trace("w", update_adv_ui_labels)
 
@@ -419,7 +481,8 @@ def main():
     adv_x_var = tk.Entry(f_adv_edit, width=10); adv_x_var.grid(row=0, column=2, padx=2)
     adv_l2 = tk.Label(f_adv_edit, text="Y 座標:"); adv_l2.grid(row=0, column=3)
     adv_y_var = tk.Entry(f_adv_edit, width=10); adv_y_var.grid(row=0, column=4, padx=2)
-    tk.Button(f_adv_edit, text="拾取點", command=pick_coordinate, bg="#E91E63", fg="white").grid(row=0, column=5, padx=5)
+    btn_pick = tk.Button(f_adv_edit, text="拾取點", command=pick_coordinate, bg="#E91E63", fg="white")
+    btn_pick.grid(row=0, column=5, padx=5)
 
     adv_l3 = tk.Label(f_adv_edit, text="─"); adv_l3.grid(row=1, column=1)
     adv_ex_var = tk.Entry(f_adv_edit, width=10); adv_ex_var.grid(row=1, column=2, padx=2)
@@ -457,6 +520,340 @@ def main():
     tk.Button(f_adv_ctrl, text="開始測試執行", command=start_adv_play, bg="#4CAF50", fg="white", height=2, width=20).pack(side="left", padx=5)
     tk.Button(f_adv_ctrl, text="停止執行", command=stop_adv_play, bg="#F44336", fg="white", height=2, width=20).pack(side="left", padx=5)
 
+    # ═══════════════════════════════════════════════════════
+    # Tab 3: 預設技能
+    # ═══════════════════════════════════════════════════════
+    tab3 = tk.Frame(nb); nb.add(tab3, text=" 預設技能 (戰鬥施放) ")
+
+    # --- 技能座標 (記憶用) ---
+    skill_positions = {}  # {"1": [x, y], ...}
+    calibration_labels = {}  # UI 標籤
+    calibrating_state = {"active": False, "queue": [], "current": None}
+    parsed_presets = []  # 解析後的套組
+
+    # --- 載入已儲存的座標 ---
+    COORD_FILE = os.path.join("scripts", "skill_presets", "coordinates.json")
+    def load_saved_coords():
+        ensure_preset_dir()
+        if os.path.exists(COORD_FILE):
+            try:
+                with open(COORD_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except: pass
+        return {}
+    def save_coords():
+        ensure_preset_dir()
+        with open(COORD_FILE, 'w', encoding='utf-8') as f:
+            json.dump(skill_positions, f, indent=2, ensure_ascii=False)
+
+    skill_positions.update(load_saved_coords())
+
+    # ── 技能指令輸入區 ──
+    f_skill_input = tk.LabelFrame(tab3, text="技能指令 (語法: @ 分套  : 分組  - 等待秒數  1-6 武器技能  a-f 角色技能)")
+    f_skill_input.pack(fill="x", padx=10, pady=5)
+
+    skill_text = tk.Text(f_skill_input, height=5, width=70, font=("Consolas", 11))
+    skill_text.pack(fill="x", padx=5, pady=5)
+    skill_text.insert("1.0", "# 範例:\n# 剣姬123a45:4:4:4b\n# @狂怒-20:1a:12345-30:ef")
+
+    f_skill_btns = tk.Frame(f_skill_input)
+    f_skill_btns.pack(fill="x", padx=5, pady=2)
+
+    skill_set_var = tk.StringVar(value="")
+    tk.Label(f_skill_btns, text="套組選擇:").pack(side="left", padx=3)
+    skill_set_combo = ttk.Combobox(f_skill_btns, textvariable=skill_set_var, state="readonly", width=15)
+    skill_set_combo.pack(side="left", padx=3)
+
+    def parse_skill_text():
+        nonlocal parsed_presets
+        raw = skill_text.get("1.0", "end").strip()
+        # 移除註解行
+        lines = [l for l in raw.splitlines() if l.strip() and not l.strip().startswith('#')]
+        clean = "\n".join(lines)
+        parsed_presets = SkillPresetParser.parse(clean)
+        if not parsed_presets:
+            messagebox.showinfo("提示", "無法解析技能指令，請檢查語法")
+            return
+        # 更新套組下拉
+        names = [p['name'] for p in parsed_presets]
+        skill_set_combo['values'] = names
+        if names:
+            skill_set_combo.set(names[0])
+        # 更新預覽
+        update_skill_preview()
+        append_log(f"✓ 已解析 {len(parsed_presets)} 個技能套組: {', '.join(names)}")
+
+    tk.Button(f_skill_btns, text="解析預覽", command=parse_skill_text, bg="#2196F3", fg="white", width=10).pack(side="left", padx=5)
+
+    def on_skill_set_select(event):
+        update_skill_preview()
+    skill_set_combo.bind("<<ComboboxSelected>>", on_skill_set_select)
+
+    # ── 解析結果預覽 ──
+    f_skill_preview = tk.LabelFrame(tab3, text="解析結果預覽")
+    f_skill_preview.pack(fill="both", expand=True, padx=10, pady=3)
+
+    skill_preview_tree = ttk.Treeview(f_skill_preview, columns=("ID", "Group", "Skills", "Wait"), show="headings", height=6)
+    skill_preview_tree.heading("ID", text="#"); skill_preview_tree.column("ID", width=30)
+    skill_preview_tree.heading("Group", text="組別"); skill_preview_tree.column("Group", width=50)
+    skill_preview_tree.heading("Skills", text="技能序列"); skill_preview_tree.column("Skills", width=250)
+    skill_preview_tree.heading("Wait", text="等待"); skill_preview_tree.column("Wait", width=60)
+    skill_preview_tree.pack(fill="both", expand=True, padx=5, pady=3)
+
+    def update_skill_preview():
+        skill_preview_tree.delete(*skill_preview_tree.get_children())
+        selected_name = skill_set_var.get()
+        preset = None
+        for p in parsed_presets:
+            if p['name'] == selected_name:
+                preset = p
+                break
+        if not preset:
+            return
+        for i, group in enumerate(preset['groups']):
+            skills_str = " → ".join(group['skills']) if group['skills'] else "(空)"
+            wait_str = f"{group['wait']}s" if group['wait'] > 0 else "-"
+            skill_preview_tree.insert("", "end", values=(i+1, f"組{i+1}", skills_str, wait_str))
+        skill_preview_tree.insert("", "end", values=("", "自動", "循環按亮起技能 (1→2→...→6→a→...→f)", "∞"))
+
+    # ── 座標校準區 ──
+    f_calibrate = tk.LabelFrame(tab3, text="技能座標校準")
+    f_calibrate.pack(fill="x", padx=10, pady=3)
+
+    # 顯示座標表格
+    f_coord_grid = tk.Frame(f_calibrate)
+    f_coord_grid.pack(fill="x", padx=5, pady=3)
+
+    tk.Label(f_coord_grid, text="武器技能:", font=("Arial", 9, "bold")).grid(row=0, column=0, sticky="w", padx=3)
+    for idx, sid in enumerate("123456"):
+        col = idx + 1
+        pos = skill_positions.get(sid, ["?", "?"])
+        lbl = tk.Label(f_coord_grid, text=f"{sid}:({pos[0]},{pos[1]})", fg="#333", font=("Consolas", 9))
+        lbl.grid(row=0, column=col, padx=4)
+        calibration_labels[sid] = lbl
+
+    tk.Label(f_coord_grid, text="角色技能:", font=("Arial", 9, "bold")).grid(row=1, column=0, sticky="w", padx=3)
+    for idx, sid in enumerate("abcdef"):
+        col = idx + 1
+        pos = skill_positions.get(sid, ["?", "?"])
+        lbl = tk.Label(f_coord_grid, text=f"{sid}:({pos[0]},{pos[1]})", fg="#333", font=("Consolas", 9))
+        lbl.grid(row=1, column=col, padx=4)
+        calibration_labels[sid] = lbl
+
+    def update_coord_labels():
+        for sid, lbl in calibration_labels.items():
+            pos = skill_positions.get(sid, ["?", "?"])
+            lbl.config(text=f"{sid}:({pos[0]},{pos[1]})")
+
+    f_cal_btns = tk.Frame(f_calibrate)
+    f_cal_btns.pack(fill="x", padx=5, pady=3)
+
+    cal_status_var = tk.StringVar(value="")
+    tk.Label(f_cal_btns, textvariable=cal_status_var, fg="#E91E63", font=("Arial", 10, "bold")).pack(side="left", padx=5)
+
+    def start_calibration_all():
+        """一鍵校準：依序點擊 1-6, a-f"""
+        queue = list("123456abcdef")
+        calibrating_state["active"] = True
+        calibrating_state["queue"] = queue
+        calibrating_state["current"] = queue.pop(0)
+        cal_status_var.set(f"📌 請點擊技能 [{calibrating_state['current']}] 的位置")
+        append_log(f"🎯 校準模式：請依序點擊各技能位置 (共 12 個)")
+
+        def on_click(x, y, button, pressed):
+            if not pressed:
+                # 找到模擬器視窗
+                hwnd = win32gui.WindowFromPoint((int(x), int(y)))
+                curr = hwnd
+                found_hwnd = None
+                while curr:
+                    for title, info in window_vars.items():
+                        if curr == info['hwnd']:
+                            found_hwnd = curr
+                            break
+                    if found_hwnd: break
+                    curr = win32gui.GetParent(curr)
+                if found_hwnd:
+                    cur_x, cur_y = win32gui.GetCursorPos()
+                    rel_x, rel_y = win32gui.ScreenToClient(found_hwnd, (cur_x, cur_y))
+                    sid = calibrating_state["current"]
+                    skill_positions[sid] = [rel_x, rel_y]
+                    append_log(f"  ✓ 技能 {sid} 座標: ({rel_x}, {rel_y})")
+                    root.after(0, update_coord_labels)
+
+                    if calibrating_state["queue"]:
+                        calibrating_state["current"] = calibrating_state["queue"].pop(0)
+                        root.after(0, lambda: cal_status_var.set(
+                            f"📌 請點擊技能 [{calibrating_state['current']}] 的位置"
+                        ))
+                        return  # 繼續監聽
+                    else:
+                        calibrating_state["active"] = False
+                        save_coords()
+                        root.after(0, lambda: cal_status_var.set("✅ 校準完成！座標已儲存"))
+                        append_log("✅ 所有技能座標校準完成！")
+                        return False  # 停止監聽
+                else:
+                    append_log("  × 未識別到模擬器視窗，請點擊模擬器內的技能")
+                    return  # 繼續監聽
+        mouse.Listener(on_click=on_click).start()
+
+    def start_calibration_single():
+        """單一點校準：只校準一個技能"""
+        sid = cal_single_var.get().strip()
+        if sid not in "123456abcdef" or len(sid) != 1:
+            messagebox.showwarning("警告", "請輸入有效的技能 ID (1-6 或 a-f)")
+            return
+        cal_status_var.set(f"📌 請點擊技能 [{sid}] 的位置")
+        def on_click(x, y, button, pressed):
+            if not pressed:
+                hwnd = win32gui.WindowFromPoint((int(x), int(y)))
+                curr = hwnd
+                found_hwnd = None
+                while curr:
+                    for title, info in window_vars.items():
+                        if curr == info['hwnd']:
+                            found_hwnd = curr
+                            break
+                    if found_hwnd: break
+                    curr = win32gui.GetParent(curr)
+                if found_hwnd:
+                    cur_x, cur_y = win32gui.GetCursorPos()
+                    rel_x, rel_y = win32gui.ScreenToClient(found_hwnd, (cur_x, cur_y))
+                    skill_positions[sid] = [rel_x, rel_y]
+                    save_coords()
+                    root.after(0, update_coord_labels)
+                    root.after(0, lambda: cal_status_var.set(f"✅ 技能 {sid}: ({rel_x}, {rel_y})"))
+                    append_log(f"  ✓ 技能 {sid} 座標已更新: ({rel_x}, {rel_y})")
+                else:
+                    append_log("  × 未識別到模擬器視窗")
+                return False
+        mouse.Listener(on_click=on_click).start()
+
+    tk.Button(f_cal_btns, text="一鍵校準 (12個)", command=start_calibration_all, bg="#E91E63", fg="white", width=14).pack(side="right", padx=3)
+    cal_single_var = tk.StringVar(value="1")
+    tk.Entry(f_cal_btns, textvariable=cal_single_var, width=3, font=("Consolas", 10)).pack(side="right", padx=2)
+    tk.Label(f_cal_btns, text="單一校準:").pack(side="right")
+    tk.Button(f_cal_btns, text="校準", command=start_calibration_single, bg="#FF9800", fg="white", width=5).pack(side="right", padx=3)
+
+    # ── 執行設定 ──
+    f_skill_settings = tk.LabelFrame(tab3, text="執行設定")
+    f_skill_settings.pack(fill="x", padx=10, pady=3)
+
+    skill_interval_var = tk.StringVar(value="0.3")
+    skill_battle_var = tk.BooleanVar(value=True)
+
+    tk.Label(f_skill_settings, text="施放間隔(秒):").pack(side="left", padx=5)
+    tk.Entry(f_skill_settings, textvariable=skill_interval_var, width=5).pack(side="left", padx=3)
+    tk.Checkbutton(f_skill_settings, text="僅戰鬥中施放", variable=skill_battle_var).pack(side="left", padx=10)
+
+    # ── 亮度除錯 ──
+    def debug_brightness():
+        selected_info = get_selected_window_info()
+        if not selected_info:
+            messagebox.showwarning("警告", "請先勾選模擬器視窗")
+            return
+        hwnd = selected_info[0][1]
+        detector = SkillCooldownDetector(skill_positions)
+        ids_to_check = [s for s in "123456abcdef" if s in skill_positions]
+        if not ids_to_check:
+            append_log("⚠️ 請先校準座標")
+            return
+        append_log("🔍 技能亮度偵測:")
+        detector.debug_brightness(hwnd, ids_to_check, log_fn=append_log)
+
+    tk.Button(f_skill_settings, text="亮度測試", command=debug_brightness, bg="#607D8B", fg="white", width=8).pack(side="left", padx=5)
+
+    # ── 儲存/載入/執行控制 ──
+    f_skill_ctrl = tk.Frame(tab3)
+    f_skill_ctrl.pack(fill="x", padx=10, pady=5)
+
+    def start_skill_play():
+        selected_info = get_selected_window_info()
+        if not selected_info:
+            messagebox.showwarning("警告", "請先勾選模擬器視窗")
+            return
+        if not parsed_presets:
+            parse_skill_text()
+            if not parsed_presets:
+                return
+        # 找到選中的套組
+        selected_name = skill_set_var.get()
+        preset = None
+        for p in parsed_presets:
+            if p['name'] == selected_name:
+                preset = p
+                break
+        if not preset:
+            messagebox.showwarning("警告", "請選擇一個套組")
+            return
+        # 檢查座標
+        all_ids = SkillPresetParser.get_all_skill_ids(preset)
+        missing = [s for s in all_ids if s not in skill_positions]
+        if missing:
+            messagebox.showwarning("警告", f"以下技能尚未校準座標: {', '.join(missing)}\n請先完成校準")
+            return
+        # 設定參數
+        try:
+            skill_player.cast_interval = float(skill_interval_var.get())
+        except:
+            skill_player.cast_interval = 0.3
+        skill_player.battle_only = skill_battle_var.get()
+        skill_player.set_positions(skill_positions)
+        status_var.set(f"技能施放中：{preset['name']}")
+        threading.Thread(target=skill_player.play, args=(selected_info, preset), daemon=True).start()
+
+    def stop_skill_play():
+        skill_player.stop()
+        status_var.set("技能已停止")
+
+    def save_skill_preset():
+        raw = skill_text.get("1.0", "end").strip()
+        if not raw:
+            messagebox.showwarning("警告", "請先輸入技能指令")
+            return
+        try:
+            interval = float(skill_interval_var.get())
+        except:
+            interval = 0.3
+        fn = save_preset(raw, skill_positions, skill_battle_var.get(), interval)
+        append_log(f"✓ 技能預設已儲存: {fn}")
+        update_preset_list()
+
+    def load_skill_preset():
+        sel = preset_combo.get()
+        if not sel:
+            return
+        data = load_preset(sel)
+        if data:
+            skill_text.delete("1.0", "end")
+            skill_text.insert("1.0", data.get("skill_text", ""))
+            if data.get("positions"):
+                skill_positions.update(data["positions"])
+                update_coord_labels()
+            if "cast_interval" in data:
+                skill_interval_var.set(str(data["cast_interval"]))
+            if "battle_only" in data:
+                skill_battle_var.set(data["battle_only"])
+            parse_skill_text()
+            append_log(f"✓ 已載入預設: {sel}")
+
+    def update_preset_list():
+        files = list_presets()
+        preset_combo['values'] = files
+
+    tk.Button(f_skill_ctrl, text="▶ 開始施放", command=start_skill_play, bg="#4CAF50", fg="white", height=2, width=14).pack(side="left", padx=5)
+    tk.Button(f_skill_ctrl, text="■ 停止施放", command=stop_skill_play, bg="#F44336", fg="white", height=2, width=14).pack(side="left", padx=5)
+    tk.Button(f_skill_ctrl, text="儲存預設", command=save_skill_preset, bg="#673AB7", fg="white", height=2, width=10).pack(side="left", padx=5)
+    preset_combo = ttk.Combobox(f_skill_ctrl, state="readonly", width=15)
+    preset_combo.pack(side="left", padx=3)
+    tk.Button(f_skill_ctrl, text="載入預設", command=load_skill_preset, bg="#FF9800", fg="white", height=2, width=10).pack(side="left", padx=3)
+
+    root.after(300, update_preset_list)
+
+    # ═══════════════════════════════════════════════════════
+    # 共用底部區域
+    # ═══════════════════════════════════════════════════════
     f_shared = tk.Frame(root); f_shared.pack(fill="x", padx=15, pady=5)
     tk.Label(f_shared, text="重複次數:").pack(side="left")
     tk.Entry(f_shared, textvariable=repeat_var, width=5).pack(side="left", padx=5)
