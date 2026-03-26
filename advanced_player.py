@@ -63,14 +63,23 @@ class AdvancedActionPlayer:
         for cycle in range(repeat):
             if not self.playing: break
             self.log(f"\n--- 進階循環 {cycle + 1}/{repeat} ---")
-            for step in self.steps:
+            
+            i = 0
+            while i < len(self.steps):
                 if not self.playing: break
-                self.execute_step(target_windows, step)
+                
+                step = self.steps[i]
+                jump_to = self.execute_step(target_windows, step, current_index=i)
+                
+                if jump_to is not None:
+                    i = jump_to
+                else:
+                    i += 1
         
         self.playing = False
         self.log("\n=== 進階腳本執行完成 ===")
 
-    def execute_step(self, target_windows, step):
+    def execute_step(self, target_windows, step, current_index=0):
         action_type = step["type"]
         params = step["params"]
         
@@ -103,6 +112,39 @@ class AdvancedActionPlayer:
                     send_click(hwnd, found_pos[0], found_pos[1])
                 else:
                     self.log(f"    × 未找到目標")
+        
+        elif action_type == "find_jump":
+            template_path = params['template']
+            threshold = params.get('threshold', 0.7)
+            jump_val = params.get('jump_value', 0)
+            mode = params.get('mode', 'relative') # 'relative' or 'absolute'
+            condition = params.get('condition', 'if_found') # 'if_found' or 'if_not_found'
+            
+            self.log(f"  ➜ 判斷圖片跳轉: {os.path.basename(template_path)} (條件: {condition})")
+            
+            # 使用第一個視窗作為主要判定依據
+            if target_hwnds:
+                main_hwnd = target_hwnds[0]
+                found_pos = self.find_image(main_hwnd, template_path, threshold)
+                
+                # 判定邏輯：(找到圖且條件為有圖就跳) 或 (沒找到圖且條件為沒圖就跳)
+                should_jump = (found_pos is not None and condition == 'if_found') or \
+                              (found_pos is None and condition == 'if_not_found')
+                
+                if should_jump:
+                    if mode == 'relative':
+                        target_idx = current_index + jump_val
+                    else:
+                        target_idx = jump_val - 1 # UI 顯示 1-indexed, 內部為 0-indexed
+                    
+                    # 邊界檢查
+                    target_idx = max(0, min(target_idx, len(self.steps)))
+                    self.log(f"    ✓ 達成條件！跳轉至步驟 {target_idx + 1}")
+                    return target_idx
+                else:
+                    self.log(f"    × 未達成跳轉條件，繼續下一步")
+        
+        return None
 
     def find_image(self, hwnd, template_path, threshold=0.7):
         """在指定視窗中尋找圖片，傳回中心座標或 None"""

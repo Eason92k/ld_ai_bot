@@ -130,6 +130,24 @@ def main():
                 thr = float(adv_ex_var.get() if adv_ex_var.get() else "0.7")
             except: thr = 0.7
             adv_player.add_step("find_click", {"template": path, "threshold": thr})
+        elif action == "找圖跳轉 (Find&Jump)":
+            path = adv_img_path.get()
+            if not path: return
+            try:
+                thr = float(adv_x_var.get() if adv_x_var.get() else "0.7")
+                jump_val = int(adv_y_var.get() if adv_y_var.get() else "0")
+                mode_str = adv_ex_var.get().upper()
+                mode = 'absolute' if mode_str == 'A' else 'relative'
+                cond_str = adv_ey_var.get().upper()
+                condition = 'if_not_found' if cond_str == 'N' else 'if_found'
+                adv_player.add_step("find_jump", {
+                    "template": path, 
+                    "threshold": thr, 
+                    "jump_value": jump_val, 
+                    "mode": mode,
+                    "condition": condition
+                })
+            except: return
         
         update_adv_list()
 
@@ -255,6 +273,9 @@ def main():
         elif action == "找圖點擊 (Find&Click)":
             adv_l1.config(text="中心 X (選):"); adv_l2.config(text="中心 Y (選):")
             adv_l3.config(text="精準度 (0.7):"); adv_l4.config(text="─")
+        elif action == "找圖跳轉 (Find&Jump)":
+            adv_l1.config(text="精準度 (0.7):"); adv_l2.config(text="步數(正前負後):")
+            adv_l3.config(text="模式 (R相對/A絕對):"); adv_l4.config(text="條件 (F有跳/N無跳):")
 
     root = tk.Tk()
     root.title("LD AI Bot - 進階自動化版")
@@ -294,7 +315,7 @@ def main():
     tab2 = tk.Frame(nb); nb.add(tab2, text=" 進階功能 (手動配置) ")
     f_adv_edit = tk.LabelFrame(tab2, text="新增動作步驟"); f_adv_edit.pack(fill="x", padx=10, pady=5)
     adv_action_var = tk.StringVar(value="點擊 (Click)")
-    cb_act = ttk.Combobox(f_adv_edit, textvariable=adv_action_var, values=["點擊 (Click)", "滑動 (Swipe)", "等候 (Wait)", "找圖點擊 (Find&Click)"], state="readonly", width=18)
+    cb_act = ttk.Combobox(f_adv_edit, textvariable=adv_action_var, values=["點擊 (Click)", "滑動 (Swipe)", "等候 (Wait)", "找圖點擊 (Find&Click)", "找圖跳轉 (Find&Jump)"], state="readonly", width=18)
     cb_act.grid(row=0, column=0, padx=5, pady=5); adv_action_var.trace("w", update_adv_ui_labels)
 
     adv_l1 = tk.Label(f_adv_edit, text="X 座標:"); adv_l1.grid(row=0, column=1)
