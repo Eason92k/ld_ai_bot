@@ -187,11 +187,42 @@ class SkillCooldownDetector:
     # 裁切大小（技能圖標周圍的像素範圍）
     CROP_SIZE = 25
 
+    # 「NEXT / 數字」佇列標記偵測 (更精確的 HSV 橘色核心)
+    # 修正：收窄寬度 (左右各 25)，調整高度，改進色域以避免鄰近干擾
+    QUEUE_HSV_LOWER = np.array([12, 180, 180], dtype=np.uint8) 
+    QUEUE_HSV_UPPER = np.array([25, 255, 255], dtype=np.uint8)
+    QUEUE_ROI_OFFSET = (0, -20, 25, 20) 
+    QUEUE_PIXEL_THRESHOLD = 50 
+    QUEUE_TOLERANCE = 50       # 基準寬容度
+
     def __init__(self, positions: dict = None):
         """
         positions: {"1": [x, y], "2": [x, y], ...}
         """
         self.positions = positions or {}
+        self.base_queued = {}  # 儲存背景橘色像素基準值 {"id": px_count}
+
+    def calibrate_base_queued(self, hwnd, skill_ids: list):
+        """在施放前校準背景的橘色像素量，避免特效誤判"""
+        im = get_window_screenshot(hwnd)
+        if im is None: return
+        
+        img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+        hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+        h, w = img_bgr.shape[:2]
+        ox, oy, ow, oh = self.QUEUE_ROI_OFFSET
+
+        self.base_queued = {}
+        for sid in skill_ids:
+            if sid not in self.positions: continue
+            x, y = self.positions[sid]
+            rx1, ry1 = max(0, x + ox - ow), max(0, y + oy - oh)
+            rx2, ry2 = min(w, x + ox + ow), min(h, y + oy + oh)
+            if rx1 >= rx2 or ry1 >= ry2: continue
+            
+            roi_hsv = hsv[ry1:ry2, rx1:rx2]
+            mask = cv2.inRange(roi_hsv, self.QUEUE_HSV_LOWER, self.QUEUE_HSV_UPPER)
+            self.base_queued[sid] = np.count_nonzero(mask)
 
     def is_skill_ready(self, hwnd, skill_id: str) -> bool:
         """偵測指定技能是否亮起（CD 完畢，可施放）"""
@@ -284,6 +315,40 @@ class SkillCooldownDetector:
             if log_fn:
                 log_fn(f"  技能 {skill_id}: 亮度={avg:.1f} {status}")
 
+    def get_queued_skills_info(self, hwnd, skill_ids: list) -> dict:
+        """回傳目前畫面上哪些技能處於「佇列中」及其增量像素數量"""
+        im = get_window_screenshot(hwnd)
+        if im is None: return {}
+
+        img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+        hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+        h, w = img_bgr.shape[:2]
+        ox, oy_global, ow, oh = self.QUEUE_ROI_OFFSET
+        result = {}
+
+        for sid in skill_ids:
+            if sid not in self.positions: continue
+            
+            # 智慧型偏移：針對不同排數給予不同 y 偏移
+            # a-f 是上排角色技能，標籤在圖示中間偏下；1-6 是底排技能，標籤在圖示上方
+            oy = 15 if sid in ['a','b','c','d','e','f'] else -20
+            
+            x, y = self.positions[sid]
+            rx1, ry1 = max(0, int(x + ox - ow)), max(0, int(y + oy - oh))
+            rx2, ry2 = min(w, int(x + ox + ow)), min(h, int(y + oy + oh))
+            if rx1 >= rx2 or ry1 >= ry2: continue
+
+            roi_hsv = hsv[ry1:ry2, rx1:rx2]
+            mask = cv2.inRange(roi_hsv, self.QUEUE_HSV_LOWER, self.QUEUE_HSV_UPPER)
+            count = np.count_nonzero(mask)
+            
+            # 使用增量判斷
+            base_px = self.base_queued.get(sid, 0)
+            if count > base_px + self.QUEUE_TOLERANCE and count >= self.QUEUE_PIXEL_THRESHOLD:
+                result[sid] = count - base_px
+                
+        return result
+
 
 # ═══════════════════════════════════════════════════════
 # 3. 技能施放引擎
@@ -358,36 +423,47 @@ class SkillPresetPlayer:
             if not self.playing:
                 break
             
-            # 戰鬥中檢測
-            if self.battle_only and not is_in_battle(main_hwnd, duration=0.5):
+            # 戰鬥中檢測 (增加時長至 1.0s 以提高穩定性)
+            if self.battle_only and not is_in_battle(main_hwnd, duration=1.0):
                 self.log("  ⚠️ 戰鬥結束，停止施放")
-                break
+                self.playing = False
+                return
 
             skills = group.get("skills", [])
             wait_time = group.get("wait", 0)
 
             if skills:
+                # ── 施放前校準背景 ──
+                self.cd_detector.calibrate_base_queued(main_hwnd, skills)
+                
                 skills_str = "→".join(skills)
                 self.log(f"  組{i+1}: {skills_str}")
                 for skill_id in skills:
-                    if not self.playing:
-                        break
-                    # 每一招施放前也檢查一次
-                    if self.battle_only and not is_in_battle(main_hwnd, duration=0.3):
-                        break
+                    if not self.playing: break
+                    if self.battle_only and not is_in_battle(main_hwnd, duration=0.5):
+                        self.playing = False
+                        return
                     self._cast_skill(all_hwnds, skill_id)
                     time.sleep(self.cast_interval)
 
-            if wait_time > 0 and self.playing:
-                self.log(f"  ⏸ 等待 {wait_time} 秒")
-                # 分段等待，方便中斷
-                waited = 0
-                while waited < wait_time and self.playing:
-                    # 等待期間也檢查
-                    if self.battle_only and not is_in_battle(main_hwnd, duration=0.5):
-                        break
-                    time.sleep(min(0.5, wait_time - waited))
-                    waited += 0.5
+            if not self.playing: break
+
+            # ── 智慧混合等待 ──
+            if skills:
+                # 有技能：以標記歸零為主，設定時間為輔 (上限 80s)
+                target_timeout = abs(wait_time) if wait_time != 0 else 80.0
+                self.wait_for_queue_clear(main_hwnd, skills, timeout=target_timeout)
+            else:
+                # 沒技能 (純等待組，如 -20)：強制等滿，僅在戰鬥結束時中止
+                if wait_time != 0:
+                    target_wait = abs(wait_time)
+                    self.log(f"  組{i+1}: 等待 {target_wait} s")
+                    wait_start = time.time()
+                    while self.playing and time.time() - wait_start < target_wait:
+                        # 戰鬥中檢測 (確保沒怪了能縮短等待)
+                        if self.battle_only and not is_in_battle(main_hwnd, duration=1.0):
+                            break
+                        time.sleep(0.5)
 
         if not self.playing:
             self.log("=== 技能預設已停止 ===")
@@ -406,9 +482,9 @@ class SkillPresetPlayer:
         self.log(f"  循環技能: {', '.join(cycle_order)}")
 
         while self.playing:
-            # 戰鬥中檢測
+            # 戰鬥中檢測 (循環模式建議維持較短偵測以利快速反應)
             if self.battle_only:
-                if not is_in_battle(main_hwnd, duration=0.5):
+                if not is_in_battle(main_hwnd, duration=0.6):
                     self.log("  ⚠️ 戰鬥結束，停止施放")
                     break
 
@@ -437,6 +513,36 @@ class SkillPresetPlayer:
         x, y = pos
         for hwnd in hwnds:
             send_click(hwnd, x, y)
+
+    def wait_for_queue_clear(self, hwnd, skill_ids, timeout=60.0):
+        """等待畫面上所有標記完全消失（數量歸零）"""
+        if not self.playing:
+            return
+            
+        # 緩衝延遲，等待標籤出現
+        time.sleep(1.0)
+        start_wait = time.time()
+        
+        while time.time() - start_wait < timeout and self.playing:
+            # 戰鬥中檢測
+            if self.battle_only and not is_in_battle(hwnd, duration=0.5):
+                time.sleep(0.5)
+                if not is_in_battle(hwnd, duration=0.5):
+                    self.playing = False
+                    return
+                
+            blocking_map = self.cd_detector.get_queued_skills_info(hwnd, skill_ids)
+            if not blocking_map:
+                # 再次確認
+                time.sleep(0.3)
+                blocking_map = self.cd_detector.get_queued_skills_info(hwnd, skill_ids)
+                if not blocking_map:
+                    return
+            
+            time.sleep(0.8)
+            
+        if time.time() - start_wait >= timeout:
+            self.log("  ⚠️ 等待佇列超時，繼續執行")
 
     def stop(self):
         """停止施放"""
