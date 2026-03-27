@@ -20,9 +20,15 @@ from ld_controller import get_window_screenshot
 # ─── 可調整的超參數 ──────────────────────────────────────────────
 # 計時器偵測：右上角 ROI (依據最新截圖微調)
 TIMER_ROI_LEFT   = 0.77   # 調回 0.77，確保時鐘圖標不被切掉
-TIMER_ROI_TOP    = 0.10   # 稍微往下對準黑色框
 TIMER_ROI_RIGHT  = 0.98
-TIMER_ROI_BOTTOM = 0.16   # 縮小高度，精確鎖讀時鐘圖標
+
+# --- 一般戰鬥位置 (藍框) ---
+TIMER_NORMAL_ROI_TOP    = 0.10   
+TIMER_NORMAL_ROI_BOTTOM = 0.16   
+
+# --- 稀有怪位置 (綠框) ---
+TIMER_RARE_ROI_TOP      = 0.16
+TIMER_RARE_ROI_BOTTOM   = 0.22
 
 # 計時器：白色像素比例閾值（超過才算有計時器）
 TIMER_WHITE_RATIO_THRESHOLD  = 0.04  # 提高到 4%
@@ -50,15 +56,16 @@ def _crop_roi(img_bgr, left_r, top_r, right_r, bottom_r):
     return img_bgr[y1:y2, x1:x2]
 
 
-def detect_timer(hwnd, log_fn=None) -> bool:
+def detect_timer(hwnd, log_fn=None, roi_top=TIMER_NORMAL_ROI_TOP, roi_bottom=TIMER_NORMAL_ROI_BOTTOM) -> bool:
     """
     偵測計時器：黑底白字雙重判讀。
+    可以傳入自定義的 roi_top 與 roi_bottom 來偵測不同位置。
     """
     im = get_window_screenshot(hwnd)
     if im is None: return False
 
     img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
-    roi = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_ROI_TOP, TIMER_ROI_RIGHT, TIMER_ROI_BOTTOM)
+    roi = _crop_roi(img_bgr, TIMER_ROI_LEFT, roi_top, TIMER_ROI_RIGHT, roi_bottom)
 
     # 1. 偵測「黑底」(梯形背景)
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
@@ -78,8 +85,8 @@ def detect_timer(hwnd, log_fn=None) -> bool:
     is_detected = has_black and has_white
     
     if log_fn:
-        res_str = "✓ 戰鬥中" if is_detected else "× 非戰鬥"
-        log_fn(f"  [診斷] {res_str} (黑底:{black_ratio:.1%}, 白字:{white_ratio:.1%})")
+        res_str = "✓ 偵測成功" if is_detected else "× 未偵測到"
+        log_fn(f"  [診斷] {res_str} (黑底:{black_ratio:.1%}, 白字:{white_ratio:.1%}, 區域:T{roi_top:.2f}-B{roi_bottom:.2f})")
         
     return is_detected
 
@@ -122,9 +129,10 @@ def _find_image_in_roi(roi_bgr, template_path, threshold=0.7, log_fn=None):
     except:
         return False
 
-def is_in_battle(hwnd, duration=2.0, log_fn=None) -> bool:
+def is_in_battle(hwnd, duration=2.0, log_fn=None, roi_top=TIMER_NORMAL_ROI_TOP, roi_bottom=TIMER_NORMAL_ROI_BOTTOM) -> bool:
     """
-    戰鬥判定：結合 ROI 圖標比對與顏色算法。
+    通用戰鬥判定：結合 ROI 圖標比對與顏色算法。
+    預設為一般位置。
     """
     import os
     import time
@@ -132,14 +140,12 @@ def is_in_battle(hwnd, duration=2.0, log_fn=None) -> bool:
     timer_path = "scripts/advanced/assets/timer.png"
     check_start = time.time()
     
-    if log_fn:
-        log_fn(f"📖 開始戰鬥判定診斷 (時長: {duration}s)...")
-        
-    while time.time() - check_start < float(duration):
+    # 為了效能，如果只是單次檢查，duration 設短一點
+    while time.time() - check_start <= float(duration):
         im = get_window_screenshot(hwnd)
         if im:
             img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
-            roi = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_ROI_TOP, TIMER_ROI_RIGHT, TIMER_ROI_BOTTOM)
+            roi = _crop_roi(img_bgr, TIMER_ROI_LEFT, roi_top, TIMER_ROI_RIGHT, roi_bottom)
             
             # --- 1. 優先：區域圖標比對 (最準確) ---
             if os.path.exists(timer_path):
@@ -147,35 +153,37 @@ def is_in_battle(hwnd, duration=2.0, log_fn=None) -> bool:
                     return True
             
             # --- 2. 備案：強化版顏色判斷 ---
-            # 偵測「極黑底」
             hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
             black_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 255, 60]))
             black_ratio = np.count_nonzero(black_mask) / black_mask.size
             
-            # 偵測「白字」
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
             _, white_mask = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY)
             white_ratio = np.count_nonzero(white_mask) / white_mask.size
             
-            # 大地圖的區域條通常黑色佔比稍低，且白字較大
-            # 我們提高黑底門檻至 22%，白字門檻 2%~8%
             is_color_match = (black_ratio >= 0.22) and (0.015 <= white_ratio <= 0.10)
-            
-            if log_fn:
-                 res_str = "✓ 顏色符合" if is_color_match else "× 顏色不符"
-                 log_fn(f"  [診斷] {res_str} (黑底:{black_ratio:.1%}, 白字:{white_ratio:.1%})")
             
             if is_color_match:
                 return True
         
+        if duration <= 0: break # 只檢查一次
         time.sleep(0.3)
         
     return False
 
 
+def is_in_battle_normal(hwnd, duration=1.0) -> bool:
+    """檢查一般戰鬥位置"""
+    return is_in_battle(hwnd, duration=duration, roi_top=TIMER_NORMAL_ROI_TOP, roi_bottom=TIMER_NORMAL_ROI_BOTTOM)
+
+def is_in_battle_rare(hwnd, duration=1.0) -> bool:
+    """檢查稀有戰鬥位置"""
+    return is_in_battle(hwnd, duration=duration, roi_top=TIMER_RARE_ROI_TOP, roi_bottom=TIMER_RARE_ROI_BOTTOM)
+
+
 def is_prebattle(hwnd) -> bool:
     """
-    綜合判斷：底部提示文字出現 → 戰鬥即將開始（等待點擊）
+    綜合判斷：底部提示文字出現，戰鬥即將開始（等待點擊）
     """
     return detect_prebattle_text(hwnd)
 
@@ -183,12 +191,17 @@ def is_prebattle(hwnd) -> bool:
 def get_battle_state(hwnd) -> str:
     """
     回傳目前戰鬥狀態字串：
-      'in_battle'   — 計時器存在，戰鬥進行中
-      'pre_battle'  — 底部文字存在，準備進入戰鬥
-      'none'        — 非戰鬥狀態
+      'in_battle_normal' — 計時器在上方 (一般戰鬥)
+      'in_battle_rare'   — 計時器在下方 (稀有戰鬥)
+      'pre_battle'       — 底部文字存在，準備進入戰鬥
+      'none'             — 非戰鬥狀態
     """
-    if is_in_battle(hwnd):
-        return "in_battle"
+    # 優先檢查計時器位置
+    if is_in_battle_normal(hwnd, duration=0):
+        return "in_battle_normal"
+    if is_in_battle_rare(hwnd, duration=0):
+        return "in_battle_rare"
+    
     if is_prebattle(hwnd):
         return "pre_battle"
     return "none"
@@ -209,7 +222,7 @@ def wait_for_battle_start(hwnd, timeout=60.0, poll_interval=0.5, log_fn=None) ->
         state = get_battle_state(hwnd)
         if log_fn:
             log_fn(f"  🔍 戰鬥偵測: {state} ({elapsed:.1f}s)")
-        if state == "in_battle":
+        if state in ["in_battle_normal", "in_battle_rare"]:
             return True
         if state == "pre_battle":
             if log_fn:
@@ -229,7 +242,8 @@ def wait_for_battle_end(hwnd, timeout=300.0, poll_interval=1.0, log_fn=None) -> 
     import time
     elapsed = 0.0
     while elapsed < timeout:
-        if not is_in_battle(hwnd):
+        # 如果兩處都沒有計時器，視為戰鬥結束
+        if not is_in_battle_normal(hwnd, duration=0) and not is_in_battle_rare(hwnd, duration=0):
             if log_fn:
                 log_fn(f"  ✅ 戰鬥結束偵測成功 ({elapsed:.1f}s)")
             return True
@@ -253,11 +267,17 @@ def debug_snapshot(hwnd, save_dir="scripts/advanced/assets"):
     img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
     h, w = img_bgr.shape[:2]
 
-    # 畫計時器 ROI（藍色）
+    # 畫計時器 ROI - 一般（藍色）
     cv2.rectangle(img_bgr,
-                  (int(w * TIMER_ROI_LEFT),  int(h * TIMER_ROI_TOP)),
-                  (int(w * TIMER_ROI_RIGHT),  int(h * TIMER_ROI_BOTTOM)),
+                  (int(w * TIMER_ROI_LEFT),  int(h * TIMER_NORMAL_ROI_TOP)),
+                  (int(w * TIMER_ROI_RIGHT),  int(h * TIMER_NORMAL_ROI_BOTTOM)),
                   (255, 0, 0), 2)
+
+    # 畫計時器 ROI - 稀有（綠色）
+    cv2.rectangle(img_bgr,
+                  (int(w * TIMER_ROI_LEFT),  int(h * TIMER_RARE_ROI_TOP)),
+                  (int(w * TIMER_ROI_RIGHT),  int(h * TIMER_RARE_ROI_BOTTOM)),
+                  (0, 255, 0), 2)
 
     # 畫文字 ROI（橘色）
     cv2.rectangle(img_bgr,

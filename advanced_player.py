@@ -159,31 +159,28 @@ class AdvancedActionPlayer:
 
         # ── 偵測戰鬥：判定是否有計時器，若無則執行跳轉 ───────────────
         elif action_type == "detect_battle":
-            # params 結構：
-            #   duration:     判定持續時間 (秒)
-            #   jump_value:   步數
-            #   mode:         'relative' | 'absolute'
             duration     = params.get('duration', 2.0)
             jump_val     = params.get('jump_value', 0)
             mode         = params.get('mode', 'relative')
 
             if target_hwnds:
                 main_hwnd = target_hwnds[0]
-                # 執行持續偵測
-                in_battle = is_in_battle(main_hwnd, duration=duration)
+                # 使用 get_battle_state 取得具體類別
+                state = get_battle_state(main_hwnd)
                 
-                # 如果判定「不在戰鬥中」，就執行跳轉
-                if not in_battle:
+                # 如果判定「不在戰鬥中」(包含 pre_battle 或 none)，就執行跳轉
+                if state not in ["in_battle_normal", "in_battle_rare"]:
                     if mode == 'relative':
                          target_idx = current_index + jump_val
                     else:
                         target_idx = jump_val - 1
                     target_idx = max(0, min(target_idx, len(self.steps)))
                     
-                    self.log(f"  ➜ 戰鬥判定：非戰鬥中 (判定時長: {duration}s) -> 跳轉至步驟 {target_idx + 1}")
+                    self.log(f"  ➜ 戰鬥判定：非戰鬥中 (狀態: {state}) -> 跳轉至步驟 {target_idx + 1}")
                     return target_idx
                 else:
-                    self.log(f"    ✓ 戰鬥中，繼續執行後續指令")
+                    status_text = "一般" if state == "in_battle_normal" else "稀有"
+                    self.log(f"    ✓ 戰鬥中({status_text})，繼續執行後續指令")
 
         # ── 等待進入戰鬥 ─────────────────────────────────────────────
         elif action_type == "wait_battle_start":
