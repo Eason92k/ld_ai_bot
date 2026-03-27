@@ -33,6 +33,13 @@ def main():
         def update_log():
             log_text.config(state="normal")
             log_text.insert("end", f"[{timestamp}] {message}\n")
+            
+            # --- 效能優化：限制日誌顯示行數（預設 500 行） ---
+            # 取得目前的總行數，如果超過 500 行則刪除最舊的內容
+            line_count = float(log_text.index("end-1c"))
+            if line_count > 500:
+                log_text.delete("1.0", "2.0") # 刪除第一行
+                
             log_text.see("end")
             log_text.config(state="disabled")
         root.after(0, update_log)

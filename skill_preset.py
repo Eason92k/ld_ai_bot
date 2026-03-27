@@ -437,13 +437,14 @@ class SkillPresetPlayer:
                 self.cd_detector.calibrate_base_queued(main_hwnd, skills)
                 
                 skills_str = "→".join(skills)
-                self.log(f"  組{i+1}: {skills_str}")
+                self.log(f"  組{i + 1}: {skills_str}")
                 for skill_id in skills:
                     if not self.playing: break
                     if self.battle_only and not is_in_battle(main_hwnd, duration=0.5):
                         self.playing = False
                         return
-                    self._cast_skill(all_hwnds, skill_id)
+                    # 修改：傳入完整的 target_windows (包含標題)
+                    self._cast_skill(target_windows, skill_id)
                     time.sleep(self.cast_interval)
 
             if not self.playing: break
@@ -496,7 +497,8 @@ class SkillPresetPlayer:
                     if not self.playing:
                         break
                     if skill_id in ready_skills:
-                        self._cast_skill(all_hwnds, skill_id)
+                        # 修改：傳入完整的 target_windows (包含標題)
+                        self._cast_skill(target_windows, skill_id)
                         time.sleep(self.cast_interval)
             else:
                 time.sleep(0.3)  # 沒有技能亮，短暫等待
@@ -504,15 +506,19 @@ class SkillPresetPlayer:
         self.playing = False
         self.log("=== 技能預設執行完畢 ===")
 
-    def _cast_skill(self, hwnds, skill_id: str):
+    def _cast_skill(self, target_windows, skill_id: str):
         """施放一個技能：對所有視窗發送點擊"""
         pos = self.cd_detector.positions.get(skill_id)
         if not pos:
             self.log(f"  ⚠️ 技能 {skill_id} 無座標")
             return
         x, y = pos
-        for hwnd in hwnds:
+        for title, hwnd in target_windows:
+            if not self.playing: break
+            # 效能與穩定性優化：為每個視窗添加獨立日誌與微小延遲
+            self.log(f"    ➜ [{title}] 施放技能 {skill_id}")
             send_click(hwnd, x, y)
+            time.sleep(0.05) # 視窗間微小延遲，避免指令衝撞
 
     def wait_for_queue_clear(self, hwnd, skill_ids, timeout=60.0):
         """等待畫面上所有標記完全消失（數量歸零）"""

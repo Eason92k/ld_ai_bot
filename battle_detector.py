@@ -210,23 +210,28 @@ def get_battle_state(hwnd) -> str:
 def wait_for_battle_start(hwnd, timeout=60.0, poll_interval=0.5, log_fn=None) -> bool:
     """
     等待直到進入戰鬥（計時器出現）或超時。
-    :param hwnd: 模擬器視窗句柄
-    :param timeout: 最長等待秒數（預設 60）
-    :param poll_interval: 每次輪詢間隔（秒）
-    :param log_fn: 日誌回呼函數
-    :return: True 表示已進入戰鬥；False 表示超時
     """
     import time
     elapsed = 0.0
+    last_state = None
+    last_log_time = 0.0
+    
     while elapsed < timeout:
         state = get_battle_state(hwnd)
-        if log_fn:
+        
+        # 效能優化：僅在狀態改變或每 5 秒輸出一次日誌，避免刷屏
+        current_time = time.time()
+        if log_fn and (state != last_state or current_time - last_log_time >= 5.0):
             log_fn(f"  🔍 戰鬥偵測: {state} ({elapsed:.1f}s)")
+            last_state = state
+            last_log_time = current_time
+            
         if state in ["in_battle_normal", "in_battle_rare"]:
             return True
-        if state == "pre_battle":
+        if state == "pre_battle" and state != last_state:
             if log_fn:
                 log_fn("  ⚔️ 偵測到戰前提示，等待計時器出現...")
+        
         time.sleep(poll_interval)
         elapsed += poll_interval
     if log_fn:

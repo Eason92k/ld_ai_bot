@@ -100,14 +100,18 @@ class AdvancedActionPlayer:
         target_hwnds = [hwnd for _, hwnd in target_windows]
 
         if action_type == "click":
-            self.log(f"  ➜ 點擊 ({params['x']}, {params['y']})")
-            for hwnd in target_hwnds:
+            for title, hwnd in target_windows:
+                if not self.playing: break
+                self.log(f"    ➜ [{title}] 執行點擊 ({params['x']}, {params['y']})")
                 send_click(hwnd, params['x'], params['y'])
+                time.sleep(0.05)
                 
         elif action_type == "swipe":
-            self.log(f"  ➜ 滑動 ({params['s_x']}, {params['s_y']}) -> ({params['e_x']}, {params['e_y']})")
-            for hwnd in target_hwnds:
+            for title, hwnd in target_windows:
+                if not self.playing: break
+                self.log(f"    ➜ [{title}] 執行滑動 ({params['s_x']}, {params['s_y']}) -> ({params['e_x']}, {params['e_y']})")
                 send_swipe(hwnd, params['s_x'], params['s_y'], params['e_x'], params['e_y'], params.get('duration', 0.5))
+                time.sleep(0.05)
                 
         elif action_type == "wait":
             self.log(f"  ➜ 等待 {params['seconds']} 秒")
