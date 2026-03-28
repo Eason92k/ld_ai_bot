@@ -12,12 +12,18 @@ from player import ActionPlayer
 from recorder import ActionRecorder
 from advanced_player import AdvancedActionPlayer
 from ld_controller import list_all_ldplayer_windows, get_window_screenshot
+import argparse
 from skill_preset import (
     SkillPresetParser, SkillCooldownDetector, SkillPresetPlayer,
     save_preset, load_preset, list_presets, PRESET_DIR, ensure_preset_dir
 )
 
 def main():
+    parser = argparse.ArgumentParser(description="LD AI Bot Multi-Instance")
+    parser.add_argument("--index", type=int, help="Auto-select emulator by index (0-based)")
+    parser.add_argument("--script", type=str, help="Auto-load script filename from scripts folder")
+    args, unknown = parser.parse_known_args()
+
     player = ActionPlayer(filename="") 
     recorder = ActionRecorder()
     skill_player = SkillPresetPlayer()
@@ -1146,8 +1152,13 @@ def main():
         found = list_all_ldplayer_windows()
         for widget in win_frame.winfo_children(): widget.destroy()
         window_vars.clear()
-        for title, hwnd in found:
+        for i, (title, hwnd) in enumerate(found):
             var = tk.BooleanVar(value=False); window_vars[title] = {'var': var, 'hwnd': hwnd}
+            # 自動勾選
+            if args.index is not None and i == args.index:
+                var.set(True)
+                append_log(f"📌 [參數] 已自動勾選模擬器: {title}")
+                
             tk.Checkbutton(win_frame, text=f"{title} (ID: {hwnd})", variable=var, anchor="w").pack(fill="x", padx=5)
         append_log(f"已整理視窗，共發現 {len(found)} 個模擬器")
 
@@ -1156,9 +1167,21 @@ def main():
     tk.Label(root, text="操作日誌:").pack(anchor="w", padx=15)
     log_text = ScrolledText(root, height=10, state="disabled"); log_text.pack(fill="both", expand=True, padx=15, pady=5)
 
+    def apply_arg_script():
+        if args.script:
+            scripts_dir = "scripts"
+            full_path = os.path.join(scripts_dir, args.script)
+            if os.path.exists(full_path):
+                script_combo.set(args.script)
+                filename_var.set(full_path)
+                append_log(f"📌 [參數] 已自動載入腳本: {args.script}")
+            else:
+                append_log(f"⚠️ [參數] 找不到指定腳本: {args.script}")
+
     root.after(100, refresh_windows)
     root.after(150, refresh_multi_list)
     root.after(200, lambda: update_script_list(auto_select=False))
+    root.after(250, apply_arg_script)
     root.mainloop()
 
 if __name__ == "__main__":
