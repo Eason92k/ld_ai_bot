@@ -181,6 +181,43 @@ def is_in_battle_rare(hwnd, duration=1.0) -> bool:
     return is_in_battle(hwnd, duration=duration, roi_top=TIMER_RARE_ROI_TOP, roi_bottom=TIMER_RARE_ROI_BOTTOM)
 
 
+def is_in_any_battle(hwnd, duration=1.0) -> bool:
+    """
+    同時偵測一般與稀有戰鬥位置。只要任一位置出現計時器即回傳 True。
+    """
+    import time
+    check_start = time.time()
+    
+    while True:
+        # 這裡不呼叫 is_in_battle_normal/rare 以避免重複截圖，直接在同一個迴圈處理
+        im = get_window_screenshot(hwnd)
+        if im:
+            img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+            
+            # 檢查 一般位置
+            roi_normal = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_NORMAL_ROI_TOP, TIMER_ROI_RIGHT, TIMER_NORMAL_ROI_BOTTOM)
+            # 檢查 稀有位置
+            roi_rare = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_RARE_ROI_TOP, TIMER_ROI_RIGHT, TIMER_RARE_ROI_BOTTOM)
+            
+            # 簡單的顏色判定邏輯提取 (為了效率)
+            def _check_timer_roi(roi):
+                hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+                black_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 255, 60]))
+                black_ratio = np.count_nonzero(black_mask) / black_mask.size
+                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                _, white_mask = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY)
+                white_ratio = np.count_nonzero(white_mask) / white_mask.size
+                return (black_ratio >= 0.22) and (0.015 <= white_ratio <= 0.10)
+
+            if _check_timer_roi(roi_normal) or _check_timer_roi(roi_rare):
+                return True
+                
+        if time.time() - check_start >= float(duration): break
+        time.sleep(0.3)
+        
+    return False
+
+
 def is_prebattle(hwnd) -> bool:
     """
     綜合判斷：底部提示文字出現，戰鬥即將開始（等待點擊）

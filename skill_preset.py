@@ -23,7 +23,7 @@ import re
 import cv2
 import numpy as np
 from ld_controller import send_click, get_window_screenshot
-from battle_detector import is_in_battle
+from battle_detector import is_in_any_battle
 
 
 # ─── 所有合法的技能 ID ────────────────────────────────
@@ -408,10 +408,20 @@ class SkillPresetPlayer:
         # ── 等待戰鬥開始 ──
         if self.battle_only:
             self.log("⏳ 等待進入戰鬥...")
+            wait_start = time.time()
+            wait_timeout = 15.0  # 加入 15 秒超時預防機制，避免戰鬥瞬間結束導致卡死
+            
             while self.playing:
-                if is_in_battle(main_hwnd, duration=1.0):
+                if is_in_any_battle(main_hwnd, duration=1.0):
                     self.log("⚔️ 偵測到戰鬥！開始施放技能")
                     break
+                
+                # 檢查是否超時
+                if time.time() - wait_start > wait_timeout:
+                    self.log(f"  ⚠️ 超時 {wait_timeout}s 未偵測到戰鬥，判定已脫離，跳過施放")
+                    self.playing = False
+                    return
+                
                 time.sleep(0.5)
 
         if not self.playing:
@@ -424,7 +434,7 @@ class SkillPresetPlayer:
                 break
             
             # 戰鬥中檢測 (增加時長至 1.0s 以提高穩定性)
-            if self.battle_only and not is_in_battle(main_hwnd, duration=1.0):
+            if self.battle_only and not is_in_any_battle(main_hwnd, duration=1.0):
                 self.log("  ⚠️ 戰鬥結束，停止施放")
                 self.playing = False
                 return
@@ -440,7 +450,7 @@ class SkillPresetPlayer:
                 self.log(f"  組{i + 1}: {skills_str}")
                 for skill_id in skills:
                     if not self.playing: break
-                    if self.battle_only and not is_in_battle(main_hwnd, duration=0.5):
+                    if self.battle_only and not is_in_any_battle(main_hwnd, duration=0.5):
                         self.playing = False
                         return
                     # 修改：傳入完整的 target_windows (包含標題)
@@ -462,7 +472,7 @@ class SkillPresetPlayer:
                     wait_start = time.time()
                     while self.playing and time.time() - wait_start < target_wait:
                         # 戰鬥中檢測 (確保沒怪了能縮短等待)
-                        if self.battle_only and not is_in_battle(main_hwnd, duration=1.0):
+                        if self.battle_only and not is_in_any_battle(main_hwnd, duration=1.0):
                             break
                         time.sleep(0.5)
 
@@ -485,7 +495,7 @@ class SkillPresetPlayer:
         while self.playing:
             # 戰鬥中檢測 (循環模式建議維持較短偵測以利快速反應)
             if self.battle_only:
-                if not is_in_battle(main_hwnd, duration=0.6):
+                if not is_in_any_battle(main_hwnd, duration=0.6):
                     self.log("  ⚠️ 戰鬥結束，停止施放")
                     break
 
@@ -531,9 +541,9 @@ class SkillPresetPlayer:
         
         while time.time() - start_wait < timeout and self.playing:
             # 戰鬥中檢測
-            if self.battle_only and not is_in_battle(hwnd, duration=0.5):
+            if self.battle_only and not is_in_any_battle(hwnd, duration=0.5):
                 time.sleep(0.5)
-                if not is_in_battle(hwnd, duration=0.5):
+                if not is_in_any_battle(hwnd, duration=0.5):
                     self.playing = False
                     return
                 

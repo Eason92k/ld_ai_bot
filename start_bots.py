@@ -6,11 +6,11 @@ import time
 # 腳本配置列表 [模擬器索引, 腳本檔名]
 # 你可以在這裡自由增加或修改
 configs = [
-    {"index": 0, "script": "活動後篇1(古代).json", "title": "古代千影-Bot"},
-    {"index": 1, "script": "活動後篇1(亡命).json", "title": "亡命千影-Bot"},
-    {"index": 2, "script": "活動後篇1(劍姬).json", "title": "劍姬千影-Bot"},
-    {"index": 3, "script": "活動後篇1.json",        "title": "坦-Bot"},
-    {"index": 4, "script": "活動後篇1.json",        "title": "補-Bot"},
+    {"index": 0, "script": "活動後篇2(古代).json", "title": "古代千影-Bot"},
+    {"index": 1, "script": "活動後篇2(亡命).json", "title": "亡命千影-Bot"},
+    {"index": 2, "script": "活動後篇2(劍姬).json", "title": "劍姬千影-Bot"},
+    {"index": 3, "script": "活動後篇2.json",        "title": "坦-Bot"},
+    {"index": 4, "script": "活動後篇2.json",        "title": "補-Bot"},
 ]
 
 def main():
