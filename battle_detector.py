@@ -19,25 +19,36 @@ from ld_controller import get_window_screenshot
 
 # ─── 可調整的超參數 ──────────────────────────────────────────────
 # 計時器偵測：右上角 ROI (依據最新截圖微調)
-TIMER_ROI_LEFT   = 0.77   # 調回 0.77，確保時鐘圖標不被切掉
-TIMER_ROI_RIGHT  = 0.98
+TIMER_ROI_LEFT   = 0.8   # 重新向右微調 1%
+TIMER_ROI_RIGHT  = 0.99
 
 # --- 一般戰鬥位置 (藍框) ---
-TIMER_NORMAL_ROI_TOP    = 0.10   
-TIMER_NORMAL_ROI_BOTTOM = 0.16   
+TIMER_NORMAL_ROI_TOP    = 0.124  # 微調向上：精準對齊無橫幅計時器
+TIMER_NORMAL_ROI_BOTTOM = 0.152   
 
 # --- 稀有怪位置 (綠框) ---
-TIMER_RARE_ROI_TOP      = 0.16
-TIMER_RARE_ROI_BOTTOM   = 0.22
+TIMER_RARE_ROI_TOP      = 0.157  # 微調向上：精準對齊有橫幅計時器
+TIMER_RARE_ROI_BOTTOM   = 0.185
 
-# 計時器：白色像素比例閾值（超過才算有計時器）
-TIMER_WHITE_RATIO_THRESHOLD  = 0.04  # 提高到 4%
+# 計時器：白色像素比例閾值（修正為更有彈性的區間，捕捉數字但排除大片白色）
+TIMER_WHITE_RATIO_MIN = 0.005  # 最少要有 0.5% 白色 (確保有數字)
+TIMER_WHITE_RATIO_MAX = 0.12   # 超過 12% 判定為背景雜訊 (例如天空或雲)
 
 # 底部提示文字偵測：底部 ROI
-TEXT_ROI_LEFT   = 0.10
-TEXT_ROI_TOP    = 0.85
-TEXT_ROI_RIGHT  = 0.90
-TEXT_ROI_BOTTOM = 0.95
+TEXT_ROI_LEFT   = 0.06
+TEXT_ROI_TOP    = 0.88
+TEXT_ROI_RIGHT  = 0.78
+TEXT_ROI_BOTTOM = 0.93
+
+# --- 判定閥值 ---
+# 無色彩純度門檻 (黑白灰佔比)：從 20% 微調至 25% (進一步過濾背景)
+TIMER_PURITY_THRESHOLD = 0.25
+# 深色底色佔比
+TIMER_BLACK_RATIO_MIN  = 0.05
+# 白色數字佔比：提高至 8% (排除任務文字 5.7%，鎖定計時器 12-14%)
+TIMER_WHITE_RATIO_MIN  = 0.08
+# 白色比例上限 (雜訊過濾)
+TIMER_WHITE_RATIO_MAX  = 0.15
 
 # 橘黃色 HSV 範圍（"タップで戦"黃色文字）
 TEXT_HSV_LOWER = np.array([15,  120, 120], dtype=np.uint8)
@@ -56,39 +67,53 @@ def _crop_roi(img_bgr, left_r, top_r, right_r, bottom_r):
     return img_bgr[y1:y2, x1:x2]
 
 
-def detect_timer(hwnd, log_fn=None, roi_top=TIMER_NORMAL_ROI_TOP, roi_bottom=TIMER_NORMAL_ROI_BOTTOM) -> bool:
+def _is_pure_timer_roi(roi, log_prefix="", log_fn=None) -> bool:
     """
-    偵測計時器：黑底白字雙重判讀。
-    可以傳入自定義的 roi_top 與 roi_bottom 來偵測不同位置。
+    核心判定：高純度無色彩與高對心對比。
+    邏輯：計時器區域應為無色彩（黑白灰），且包含深色底與淺色字。
     """
-    im = get_window_screenshot(hwnd)
-    if im is None: return False
-
-    img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
-    roi = _crop_roi(img_bgr, TIMER_ROI_LEFT, roi_top, TIMER_ROI_RIGHT, roi_bottom)
-
-    # 1. 偵測「黑底」(梯形背景)
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    lower_black = np.array([0, 0, 0])
-    upper_black = np.array([180, 255, 80]) # 亮度低於 80 視為黑色背景
-    black_mask = cv2.inRange(hsv, lower_black, upper_black)
-    black_ratio = np.count_nonzero(black_mask) / black_mask.size
-
-    # 2. 偵測「白字」(數字與時鐘)
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    _, white_mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
-    white_ratio = np.count_nonzero(white_mask) / white_mask.size
+    if roi is None or roi.size == 0: return False
     
-    # 判定條件：黑底需佔一定比例，且白字比例也需達標
-    has_black = black_ratio >= 0.15 # 黑底至少 15%
-    has_white = white_ratio >= 0.01 # 白字至少 1%
-    is_detected = has_black and has_white
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    
+    # 1. 偵測「無色彩 (Achromatic)」像素：彩度 (S) 低於 70 視為黑白灰 (放寬以包含微藍的陰影)
+    monochrome_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 70, 255]))
+    monochrome_count = np.count_nonzero(monochrome_mask)
+    roi_size = monochrome_mask.size
+    purity = monochrome_count / roi_size
+    
+    # 2. 在無色彩區域中偵測「黑色底」與「白色字」
+    # 黑底：亮度 V < 100 且彩度低
+    black_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 70, 100]))
+    black_ratio = np.count_nonzero(black_mask) / roi_size
+    
+    # 白字：亮度 V > 185
+    _, white_mask = cv2.threshold(gray, 185, 255, cv2.THRESH_BINARY)
+    white_ratio = np.count_nonzero(white_mask) / roi_size
+    
+    # 綜合判定
+    is_pure = purity >= TIMER_PURITY_THRESHOLD
+    has_black = black_ratio >= TIMER_BLACK_RATIO_MIN
+    has_white = TIMER_WHITE_RATIO_MIN <= white_ratio <= TIMER_WHITE_RATIO_MAX
+    
+    is_detected = is_pure and has_black and has_white
     
     if log_fn:
-        res_str = "✓ 偵測成功" if is_detected else "× 未偵測到"
-        log_fn(f"  [診斷] {res_str} (黑底:{black_ratio:.1%}, 白字:{white_ratio:.1%}, 區域:T{roi_top:.2f}-B{roi_bottom:.2f})")
+        res_tag = "✓ 成功" if is_detected else "× 失敗"
+        purity_info = f"純度:{purity:.1%}" if is_pure else f"雜質多({purity:.1%})"
+        log_fn(f"  [{log_prefix}] {res_tag} | {purity_info} | 黑底:{black_ratio:.1%}, 白字:{white_ratio:.1%}")
         
     return is_detected
+
+
+def detect_timer(hwnd, log_fn=None, roi_top=TIMER_NORMAL_ROI_TOP, roi_bottom=TIMER_NORMAL_ROI_BOTTOM) -> bool:
+    """診斷專用：偵測單一計時器位置"""
+    im = get_window_screenshot(hwnd)
+    if im is None: return False
+    img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+    roi = _crop_roi(img_bgr, TIMER_ROI_LEFT, roi_top, TIMER_ROI_RIGHT, roi_bottom)
+    return _is_pure_timer_roi(roi, log_prefix=f"區域 {roi_top:.3f}-{roi_bottom:.3f}", log_fn=log_fn)
 
 
 def detect_prebattle_text(hwnd) -> bool:
@@ -143,27 +168,10 @@ def is_in_battle(hwnd, duration=2.0, log_fn=None, roi_top=TIMER_NORMAL_ROI_TOP, 
     # 為了效能，如果只是單次檢查，duration 設短一點
     while time.time() - check_start <= float(duration):
         im = get_window_screenshot(hwnd)
-        if im:
+        if im is not None:
             img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
             roi = _crop_roi(img_bgr, TIMER_ROI_LEFT, roi_top, TIMER_ROI_RIGHT, roi_bottom)
-            
-            # --- 1. 優先：區域圖標比對 (最準確) ---
-            if os.path.exists(timer_path):
-                if _find_image_in_roi(roi, timer_path, threshold=0.70, log_fn=log_fn):
-                    return True
-            
-            # --- 2. 備案：強化版顏色判斷 ---
-            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-            black_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 255, 60]))
-            black_ratio = np.count_nonzero(black_mask) / black_mask.size
-            
-            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            _, white_mask = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY)
-            white_ratio = np.count_nonzero(white_mask) / white_mask.size
-            
-            is_color_match = (black_ratio >= 0.22) and (0.015 <= white_ratio <= 0.10)
-            
-            if is_color_match:
+            if _is_pure_timer_roi(roi, log_prefix="一般判定", log_fn=log_fn):
                 return True
         
         if duration <= 0: break # 只檢查一次
@@ -199,17 +207,7 @@ def is_in_any_battle(hwnd, duration=1.0) -> bool:
             # 檢查 稀有位置
             roi_rare = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_RARE_ROI_TOP, TIMER_ROI_RIGHT, TIMER_RARE_ROI_BOTTOM)
             
-            # 簡單的顏色判定邏輯提取 (為了效率)
-            def _check_timer_roi(roi):
-                hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-                black_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 255, 60]))
-                black_ratio = np.count_nonzero(black_mask) / black_mask.size
-                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                _, white_mask = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY)
-                white_ratio = np.count_nonzero(white_mask) / white_mask.size
-                return (black_ratio >= 0.22) and (0.015 <= white_ratio <= 0.10)
-
-            if _check_timer_roi(roi_normal) or _check_timer_roi(roi_rare):
+            if _is_pure_timer_roi(roi_normal) or _is_pure_timer_roi(roi_rare):
                 return True
                 
         if time.time() - check_start >= float(duration): break
@@ -328,7 +326,26 @@ def debug_snapshot(hwnd, save_dir="scripts/advanced/assets"):
                   (0, 128, 255), 2)
 
     os.makedirs(save_dir, exist_ok=True)
-    path = os.path.join(save_dir, f"battle_debug_{int(_time.time())}.png")
+    path = os.path.join(save_dir, f"battle_debug_{hwnd}_{int(_time.time())}.png")
     cv2.imwrite(path, img_bgr)
-    print(f"除錯截圖已儲存: {path}")
     return path
+
+
+if __name__ == "__main__":
+    # 診斷模式：當直接執行 python battle_detector.py 時
+    print("=== 戰鬥偵測診斷模式 ===")
+    from ld_controller import list_all_ldplayer_windows
+    import os
+    
+    windows = list_all_ldplayer_windows()
+    if not windows:
+        print("× 未能找到任何 LDPlayer 視窗。")
+    else:
+        for title, hwnd in windows:
+            path = debug_snapshot(hwnd)
+            print(f"\n視窗 [{title}] 已存檔: {path}")
+            # 同時在控制台進行兩處位置的純度診斷
+            detect_timer(hwnd, log_fn=print, roi_top=TIMER_NORMAL_ROI_TOP, roi_bottom=TIMER_NORMAL_ROI_BOTTOM)
+            detect_timer(hwnd, log_fn=print, roi_top=TIMER_RARE_ROI_TOP, roi_bottom=TIMER_RARE_ROI_BOTTOM)
+            
+        print("\n📢 請檢查上述圖片中的藍框是否正確套住了計時器。")
