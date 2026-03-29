@@ -1,0 +1,139 @@
+{
+  "mode": "independent",
+  "smart_mode": false,
+  "actions": [
+    {
+      "time": 1.807807445526123,
+      "window_title": "1.古代千影",
+      "type": "click",
+      "x": 130,
+      "y": 331
+    },
+    {
+      "time": 4.312224626541138,
+      "window_title": "2.亡命千影",
+      "type": "click",
+      "x": 142,
+      "y": 296
+    },
+    {
+      "time": 5.568515300750732,
+      "window_title": "2.亡命千影",
+      "type": "click",
+      "x": 174,
+      "y": 402
+    },
+    {
+      "time": 6.656203031539917,
+      "window_title": "2.亡命千影",
+      "type": "click",
+      "x": 165,
+      "y": 366
+    },
+    {
+      "time": 9.530461311340332,
+      "window_title": "1.古代千影",
+      "type": "click",
+      "x": 266,
+      "y": 315
+    },
+    {
+      "time": 9.696227788925171,
+      "window_title": "1.古代千影",
+      "type": "click",
+      "x": 266,
+      "y": 315
+    },
+    {
+      "time": 9.863524675369263,
+      "window_title": "1.古代千影",
+      "type": "click",
+      "x": 266,
+      "y": 315
+    },
+    {
+      "time": 11.446025848388672,
+      "window_title": "3.劍姬千影",
+      "type": "click",
+      "x": 88,
+      "y": 543
+    },
+    {
+      "time": 12.236314058303833,
+      "window_title": "3.劍姬千影",
+      "type": "click",
+      "x": 203,
+      "y": 494
+    },
+    {
+      "time": 12.842277765274048,
+      "window_title": "3.劍姬千影",
+      "type": "click",
+      "x": 261,
+      "y": 493
+    },
+    {
+      "time": 13.763344764709473,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 251,
+      "y": 548
+    },
+    {
+      "time": 14.829059839248657,
+      "window_title": "5.補千影",
+      "type": "click",
+      "x": 261,
+      "y": 546
+    },
+    {
+      "time": 16.07510542869568,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 138,
+      "y": 481
+    },
+    {
+      "time": 17.169824361801147,
+      "window_title": "5.補千影",
+      "type": "click",
+      "x": 142,
+      "y": 481
+    },
+    {
+      "time": 29.202361583709717,
+      "window_title": "3.劍姬千影",
+      "type": "click",
+      "x": 205,
+      "y": 488
+    },
+    {
+      "time": 30.35669207572937,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 32,
+      "y": 478
+    },
+    {
+      "time": 31.477388620376587,
+      "window_title": "5.補千影",
+      "type": "click",
+      "x": 42,
+      "y": 479
+    },
+    {
+      "time": 44.288790225982666,
+      "window_title": "1.古代千影",
+      "type": "click",
+      "x": 216,
+      "y": 355
+    },
+    {
+      "time": 47.0885055065155,
+      "window_title": "1.古代千影",
+      "type": "click",
+      "x": 171,
+      "y": 344
+    }
+  ]
+}

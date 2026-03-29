@@ -123,6 +123,15 @@ def main():
         if is_advanced:
             # 執行進階腳本播放
             adv_player.steps = data.get("steps", [])
+            
+            # 抓取目前的預設設定
+            ps_file = preset_combo.get()
+            ps_set = skill_set_var.get()
+            if ps_file and ps_set:
+                adv_player.runtime_preset = {"preset_file": ps_file, "set_name": ps_set}
+            else:
+                adv_player.runtime_preset = None
+
             status_var.set("進階播放中...")
             play_btn.config(state="disabled")
             stop_play_btn.config(state="normal")
@@ -372,6 +381,15 @@ def main():
         try: repeat = int(repeat_var.get())
         except: repeat = 1
         status_var.set("進階播放中...")
+        
+        # 抓取目前的預設設定
+        ps_file = preset_combo.get()
+        ps_set = skill_set_var.get()
+        if ps_file and ps_set:
+            adv_player.runtime_preset = {"preset_file": ps_file, "set_name": ps_set}
+        else:
+            adv_player.runtime_preset = None
+
         threading.Thread(target=adv_player.play, args=(selected_info, repeat), daemon=True).start()
 
     def stop_adv_play():
@@ -472,7 +490,15 @@ def main():
                 adv_y_var.delete(0, tk.END); adv_y_var.insert(0, set_var.get())
                 top.destroy()
         
-        tk.Button(top, text="確定選擇", command=confirm, bg="#4CAF50", fg="white", width=15).pack(pady=15)
+        def use_current():
+            adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "__CURRENT__")
+            adv_y_var.delete(0, tk.END); adv_y_var.insert(0, "")
+            top.destroy()
+        
+        btn_frame = tk.Frame(top)
+        btn_frame.pack(pady=15)
+        tk.Button(btn_frame, text="確定選擇", command=confirm, bg="#4CAF50", fg="white", width=12).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="✨ 動態套用", command=use_current, bg="#2196F3", fg="white", width=12).pack(side="left", padx=5)
 
     def update_adv_ui_labels(*args):
         action = adv_action_var.get()
@@ -498,7 +524,11 @@ def main():
             adv_l1.config(text="逾時秒數:"); adv_l2.config(text="超時跳轉步數:")
             adv_l3.config(text="超時是否跳 (Y/N):"); adv_l4.config(text="─")
         elif action == "戰鬥技能 (Combat Skill)":
-            adv_l1.config(text="預設檔名(JSON):"); adv_l2.config(text="套組名稱(@名稱):")
+            if adv_x_var.get() == "__CURRENT__":
+                adv_l1.config(text="預設檔名:"); adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "__CURRENT__")
+                adv_l2.config(text="套組名稱:"); adv_y_var.delete(0, tk.END); adv_y_var.insert(0, "(動態讀取)")
+            else:
+                adv_l1.config(text="預設檔名(JSON):"); adv_l2.config(text="套組名稱(@名稱):")
             adv_l3.config(text="─"); adv_l4.config(text="─")
             btn_pick.config(text="選取技能", command=select_combat_skill_dialog, bg="#9C27B0")
         else:
@@ -956,6 +986,18 @@ def main():
                 load_all_skill_data(files[0])
     
     root.after(300, init_load)
+    
+    def get_all_skill_options():
+        """獲取所有『檔案:套組』的清單供下拉選擇"""
+        options = ["(不指定:全域)"]
+        files = list_presets()
+        for fn in files:
+            data = load_preset(fn)
+            if data:
+                ps = SkillPresetParser.parse(data.get("skill_text", ""))
+                for p in ps:
+                    options.append(f"{fn}:{p['name']}")
+        return options
 
     # ═══════════════════════════════════════════════════════
     # Tab 4: 多開管理 (獨立控制)
@@ -976,18 +1018,22 @@ def main():
         # 標題列
         header_bg = "#e0e0e0"
         tk.Label(multi_list_frame, text="選取", bg=header_bg, width=5).grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
-        tk.Label(multi_list_frame, text="模擬器視窗標題 (HWND)", bg=header_bg, width=35).grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
-        tk.Label(multi_list_frame, text="指定執行腳本", bg=header_bg, width=30).grid(row=0, column=2, sticky="nsew", padx=1, pady=1)
-        tk.Label(multi_list_frame, text="目前狀態", bg=header_bg, width=12).grid(row=0, column=3, sticky="nsew", padx=1, pady=1)
-        tk.Label(multi_list_frame, text="操作", bg=header_bg, width=10).grid(row=0, column=4, sticky="nsew", padx=1, pady=1)
+        tk.Label(multi_list_frame, text="模擬器視窗標題 (HWND)", bg=header_bg, width=30).grid(row=0, column=1, sticky="nsew", padx=1, pady=1)
+        tk.Label(multi_list_frame, text="指定執行腳本", bg=header_bg, width=22).grid(row=0, column=2, sticky="nsew", padx=1, pady=1)
+        tk.Label(multi_list_frame, text="戰鬥技能套組", bg=header_bg, width=22).grid(row=0, column=3, sticky="nsew", padx=1, pady=1)
+        tk.Label(multi_list_frame, text="目前狀態", bg=header_bg, width=10).grid(row=0, column=4, sticky="nsew", padx=1, pady=1)
+        tk.Label(multi_list_frame, text="操作", bg=header_bg, width=8).grid(row=0, column=5, sticky="nsew", padx=1, pady=1)
+
+        skill_options = get_all_skill_options()
 
         for i, (title, hwnd) in enumerate(found):
             row = i + 1
             check_var = tk.BooleanVar(value=False)
             script_var = tk.StringVar()
+            skill_inst_var = tk.StringVar()
             status_var_inst = tk.StringVar(value="停止")
             
-            # 若已有正在執行的狀態，繼承它 (這裡簡單處理，刷新後預設停止，除非我們要追蹤全域狀態)
+            # 若已有正在執行的狀態
             if hwnd in instance_threads and instance_threads[hwnd].is_alive():
                 status_var_inst.set("運行中")
 
@@ -999,24 +1045,30 @@ def main():
             tk.Label(multi_list_frame, text=f"{title} ({hwnd})", anchor="w").grid(row=row, column=1, sticky="w", padx=5, pady=1)
             
             # 腳本下拉
-            cmb = ttk.Combobox(multi_list_frame, textvariable=script_var, values=scripts, state="readonly", width=28)
+            cmb = ttk.Combobox(multi_list_frame, textvariable=script_var, values=scripts, state="readonly", width=20)
             cmb.grid(row=row, column=2, padx=5, pady=1)
             if scripts: cmb.set(scripts[0])
             
+            # 技能套組下拉
+            cmb_skill = ttk.Combobox(multi_list_frame, textvariable=skill_inst_var, values=skill_options, state="readonly", width=20)
+            cmb_skill.grid(row=row, column=3, padx=5, pady=1)
+            if skill_options: cmb_skill.set(skill_options[0])
+
             # 狀態標籤
             lbl_status = tk.Label(multi_list_frame, textvariable=status_var_inst, fg="gray")
-            lbl_status.grid(row=row, column=3, padx=1, pady=1)
+            lbl_status.grid(row=row, column=4, padx=1, pady=1)
             
             # 開始/停止按鈕
             btn_text = "停止" if status_var_inst.get() == "運行中" else "開始"
             btn_bg = "#F44336" if btn_text == "停止" else "#4CAF50"
             btn = tk.Button(multi_list_frame, text=btn_text, bg=btn_bg, fg="white", width=8)
-            btn.config(command=lambda h=hwnd, s=script_var, v=status_var_inst, b=btn: toggle_instance_play(h, s, v, b))
-            btn.grid(row=row, column=4, padx=5, pady=2)
+            btn.config(command=lambda h=hwnd, s=script_var, sk=skill_inst_var, v=status_var_inst, b=btn: toggle_instance_play(h, s, sk, v, b))
+            btn.grid(row=row, column=5, padx=5, pady=2)
             
             instance_row_vars[hwnd] = {
                 'check': check_var,
                 'script': script_var,
+                'skill_preset': skill_inst_var,
                 'status': status_var_inst,
                 'btn': btn,
                 'title': title
@@ -1030,9 +1082,9 @@ def main():
             if info['check'].get():
                 curr_status = info['status'].get()
                 if action_type == 'start' and curr_status != "運行中":
-                    toggle_instance_play(hwnd, info['script'], info['status'], info['btn'])
+                    toggle_instance_play(hwnd, info['script'], info['skill_preset'], info['status'], info['btn'])
                 elif action_type == 'stop' and curr_status == "運行中":
-                    toggle_instance_play(hwnd, info['script'], info['status'], info['btn'])
+                    toggle_instance_play(hwnd, info['script'], info['skill_preset'], info['status'], info['btn'])
 
     tk.Button(f_multi_ctrl, text="▶ 啟動選中項", command=lambda: batch_action('start'), bg="#4CAF50", fg="white").pack(side="left", padx=5)
     tk.Button(f_multi_ctrl, text="■ 停止選中項", command=lambda: batch_action('stop'), bg="#F44336", fg="white").pack(side="left", padx=5)
@@ -1060,7 +1112,7 @@ def main():
     multi_v_scroll.pack_forget(); multi_v_scroll.pack(side="right", fill="y")
     multi_h_scroll.pack(side="bottom", fill="x")
 
-    def toggle_instance_play(hwnd, script_var, status_var_inst, btn):
+    def toggle_instance_play(hwnd, script_var, skill_preset_var, status_var_inst, btn):
         if status_var_inst.get() == "運行中":
             # 停止
             if hwnd in instance_players:
@@ -1081,11 +1133,18 @@ def main():
             status_var_inst.set("運行中")
             btn.config(text="停止", bg="#F44336")
             
-            t = threading.Thread(target=run_single_instance_task, args=(hwnd, script_path, status_var_inst, btn), daemon=True)
+            # 獲取選定的技能
+            skill_val = skill_preset_var.get()
+            runtime_preset = None
+            if skill_val and ":" in skill_val:
+                fn, sn = skill_val.split(":", 1)
+                runtime_preset = {"preset_file": fn, "set_name": sn}
+            
+            t = threading.Thread(target=run_single_instance_task, args=(hwnd, script_path, status_var_inst, btn, runtime_preset), daemon=True)
             instance_threads[hwnd] = t
             t.start()
 
-    def run_single_instance_task(hwnd, script_path, status_var_inst, btn):
+    def run_single_instance_task(hwnd, script_path, status_var_inst, btn, runtime_preset=None):
         title = ""
         for h, info in instance_row_vars.items():
             if h == hwnd:
@@ -1104,6 +1163,16 @@ def main():
             if is_advanced:
                 inst_player = AdvancedActionPlayer(skill_player=SkillPresetPlayer())
                 inst_player.steps = data.get("steps", [])
+                
+                # 注入動態套用技能：若有指定則用指定，否則用主 UI 當前選擇
+                if runtime_preset:
+                    inst_player.runtime_preset = runtime_preset
+                else:
+                    # 抓取目前 Tab 3 的選擇
+                    ps_file = preset_combo.get()
+                    ps_set = skill_set_var.get()
+                    if ps_file and ps_set:
+                        inst_player.runtime_preset = {"preset_file": ps_file, "set_name": ps_set}
             else:
                 inst_player = ActionPlayer(filename=script_path)
                 inst_player.load()

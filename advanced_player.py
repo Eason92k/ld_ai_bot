@@ -16,6 +16,7 @@ class AdvancedActionPlayer:
         self.playing = False
         self.log_callback = None
         self.skill_player = skill_player
+        self.runtime_preset = None # {"preset_file": str, "set_name": str}
         self.scripts_dir = "scripts"
         if not os.path.exists(self.scripts_dir):
             os.makedirs(self.scripts_dir)
@@ -238,14 +239,18 @@ class AdvancedActionPlayer:
 
         # ── 執行預設技能組 ──
         elif action_type == "combat_skill":
-            # params 結構：
-            #   preset_file: 預設檔名
-            #   set_name:    套組名稱 (@名稱)
             preset_file = params.get('preset_file')
             set_name    = params.get('set_name')
             
-            if self.skill_player and target_hwnds:
+            # 優先檢查是否為動態套用的特殊標記
+            if preset_file == "__CURRENT__" and self.runtime_preset:
+                preset_file = self.runtime_preset.get('preset_file')
+                set_name = self.runtime_preset.get('set_name')
+                self.log(f"  ➜ 執行全域/實例動態技能：檔案={preset_file}, 套組={set_name}")
+            else:
                 self.log(f"  ➜ 執行預設技能：檔案={preset_file}, 套組={set_name}")
+            
+            if self.skill_player and target_hwnds:
                 # 載入預設
                 data = load_preset(preset_file)
                 if not data:

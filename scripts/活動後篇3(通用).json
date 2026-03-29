@@ -1,0 +1,78 @@
+{
+  "type": "advanced",
+  "steps": [
+    {
+      "type": "find_click",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774762978.png",
+        "threshold": 0.5
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 5.0
+      }
+    },
+    {
+      "type": "find_click",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774691363.png",
+        "threshold": 0.5
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 5.0
+      }
+    },
+    {
+      "type": "detect_battle",
+      "params": {
+        "duration": 1.0,
+        "jump_value": -4,
+        "mode": "relative"
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 3.0
+      }
+    },
+    {
+      "type": "find_click",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774764274.png",
+        "threshold": 0.5
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 4.0
+      }
+    },
+    {
+      "type": "combat_skill",
+      "params": {
+        "preset_file": "__CURRENT__",
+        "set_name": ""
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 6.0
+      }
+    },
+    {
+      "type": "find_click",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774762978.png",
+        "threshold": 0.5
+      }
+    }
+  ]
+}

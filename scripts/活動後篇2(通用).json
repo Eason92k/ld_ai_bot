@@ -44,8 +44,8 @@
     {
       "type": "combat_skill",
       "params": {
-        "preset_file": "技能預設.json",
-        "set_name": "古代"
+        "preset_file": "__CURRENT__",
+        "set_name": ""
       }
     }
   ]

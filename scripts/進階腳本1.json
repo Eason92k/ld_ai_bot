@@ -1,0 +1,113 @@
+{
+  "type": "advanced",
+  "steps": [
+    {
+      "type": "find_click",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774691363.png",
+        "threshold": 0.5
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 6.0
+      }
+    },
+    {
+      "type": "find_jump",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774511622.png",
+        "threshold": 0.5,
+        "jump_value": 1,
+        "mode": "absolute",
+        "condition": "if_not_found"
+      }
+    },
+    {
+      "type": "click",
+      "params": {
+        "x": 102,
+        "y": 407
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 8.0
+      }
+    },
+    {
+      "type": "click",
+      "params": {
+        "x": 170,
+        "y": 603
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 5.0
+      }
+    },
+    {
+      "type": "click",
+      "params": {
+        "x": 170,
+        "y": 603
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 5.0
+      }
+    },
+    {
+      "type": "click",
+      "params": {
+        "x": 170,
+        "y": 603
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 5.0
+      }
+    },
+    {
+      "type": "click",
+      "params": {
+        "x": 242,
+        "y": 607
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 5.0
+      }
+    },
+    {
+      "type": "click",
+      "params": {
+        "x": 241,
+        "y": 509
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 5.0
+      }
+    },
+    {
+      "type": "click",
+      "params": {
+        "x": 247,
+        "y": 562
+      }
+    }
+  ]
+}
