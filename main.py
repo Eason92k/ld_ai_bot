@@ -183,6 +183,8 @@ def main():
             "等候 (Wait)": "wait",
             "找圖點擊 (Find&Click)": "find_click",
             "找圖跳轉 (Find&Jump)": "find_jump",
+            "結束關卡 (Check Finish)": "check_finish",
+            "智能結算 (Smart Finish)": "smart_finish",
             "偵測戰鬥 (Detect Battle)": "detect_battle",
             "等待進入戰鬥 (Wait Battle Start)": "wait_battle_start",
             "等待戰鬥結束 (Wait Battle End)": "wait_battle_end",
@@ -210,6 +212,21 @@ def main():
                     "mode": 'absolute' if adv_ex_var.get().upper() == 'A' else 'relative',
                     "condition": 'if_not_found' if adv_ey_var.get().upper() == 'N' else 'if_found'
                 }
+            elif stype == "check_finish":
+                params = {
+                    "template": adv_img_path.get(),
+                    "threshold": float(adv_x_var.get() or "0.7"),
+                    "jump_value": int(adv_y_var.get() or "0"),
+                    "mode": 'absolute' if adv_ex_var.get().upper() == 'A' else 'relative'
+                }
+            elif stype == "smart_finish":
+                params = {
+                    "template": adv_img_path.get(),
+                    "threshold": float(adv_ex_var.get() or "0.6"),
+                    "x": int(adv_x_var.get() or "170"),
+                    "y": int(adv_y_var.get() or "603"),
+                    "timeout": int(adv_ey_var.get() or "60")
+                }
             elif stype == "detect_battle":
                 params = {
                     "duration": float(adv_x_var.get() or "2.0"),
@@ -230,6 +247,18 @@ def main():
             append_log(f"⚠️ 參數格式錯誤: {e}")
             return None, None
 
+    def select_adv_image():
+        path = filedialog.askopenfilename(
+            initialdir="scripts/advanced/assets",
+            title="選擇圖片樣板",
+            filetypes=(("PNG files", "*.png"), ("All files", "*.*"))
+        )
+        if path:
+            # 轉換為相對路徑
+            rel_path = os.path.relpath(path, os.getcwd()).replace("\\", "/")
+            adv_img_path.set(rel_path)
+            append_log(f"🖼 已選擇圖片: {os.path.basename(rel_path)}")
+
     def add_adv_step():
         stype, params = get_adv_step_from_ui()
         if stype:
@@ -240,6 +269,8 @@ def main():
             elif stype == "detect_battle": append_log(f"加入戰鬥跳轉：若 {params['duration']}s 內無計時器則跳轉 {params['jump_value']} 步")
             elif stype == "wait_battle_start": append_log(f"加入等待進入戰鬥：timeout={params['timeout']}s, 超時跳={params['on_timeout_jump']}")
             elif stype == "wait_battle_end": append_log(f"加入等待戰鬥結束：timeout={params['timeout']}s, 超時跳={params['on_timeout_jump']}")
+            elif stype == "check_finish": append_log(f"加入結束關卡：圖={os.path.basename(params['template'])}, 沒圖則跳={params['jump_value']}")
+            elif stype == "smart_finish": append_log(f"加入智能結算：終點={os.path.basename(params['template'])}, 輔助={params['x']},{params['y']}")
 
     def update_adv_step():
         selected = adv_tree.selection()
@@ -289,6 +320,8 @@ def main():
             "wait": "等候 (Wait)",
             "find_click": "找圖點擊 (Find&Click)",
             "find_jump": "找圖跳轉 (Find&Jump)",
+            "check_finish": "結束關卡 (Check Finish)",
+            "smart_finish": "智能結算 (Smart Finish)",
             "detect_battle": "偵測戰鬥 (Detect Battle)",
             "wait_battle_start": "等待進入戰鬥 (Wait Battle Start)",
             "wait_battle_end": "等待戰鬥結束 (Wait Battle End)",
@@ -328,6 +361,17 @@ def main():
                 adv_x_var.insert(0, str(params.get('timeout', '')))
                 adv_y_var.insert(0, str(params.get('jump_value', '0')))
                 adv_ex_var.insert(0, 'Y' if params.get('on_timeout_jump') else 'N')
+            elif stype == "check_finish":
+                adv_img_path.set(params.get('template', ''))
+                adv_x_var.insert(0, str(params.get('threshold', '0.7')))
+                adv_y_var.insert(0, str(params.get('jump_value', '0')))
+                adv_ex_var.insert(0, 'A' if params.get('mode') == 'absolute' else 'R')
+            elif stype == "smart_finish":
+                adv_img_path.set(params.get('template', ''))
+                adv_x_var.insert(0, str(params.get('x', '170')))
+                adv_y_var.insert(0, str(params.get('y', '603')))
+                adv_ex_var.insert(0, str(params.get('threshold', '0.6')))
+                adv_ey_var.insert(0, str(params.get('timeout', '60')))
             elif stype == "combat_skill":
                 adv_x_var.insert(0, params.get('preset_file', ''))
                 adv_y_var.insert(0, params.get('set_name', ''))
@@ -523,6 +567,23 @@ def main():
 
     def update_adv_ui_labels(*args):
         action = adv_action_var.get()
+        
+        # 1. 動作分類
+        coord_actions = ("點擊 (Click)", "滑動 (Swipe)", "找圖點擊 (Find&Click)", "智能結算 (Smart Finish)")
+        skill_actions = ("戰鬥技能 (Combat Skill)",)
+        
+        # 2. 先更新按鈕狀態與預設標籤（讓所有 elif 共享這個基準）
+        if 'btn_pick' in locals() or 'btn_pick' in globals() or 'btn_pick' in vars():
+            try:
+                if action in coord_actions:
+                    btn_pick.config(text="拾取點", command=pick_coordinate, bg="#E91E63", state="normal")
+                elif action in skill_actions:
+                    btn_pick.config(text="選取技能", command=select_combat_skill_dialog, bg="#9C27B0", state="normal")
+                else:
+                    btn_pick.config(text="─", state="disabled", bg="#cccccc")
+            except: pass
+
+        # 3. 根據動作更新標籤內容與預設值
         if action == "點擊 (Click)":
             adv_l1.config(text="X 座標:"); adv_l2.config(text="Y 座標:")
             adv_l3.config(text="─"); adv_l4.config(text="─")
@@ -532,17 +593,33 @@ def main():
         elif action == "等候 (Wait)":
             adv_l1.config(text="等候秒數:"); adv_l2.config(text="─")
             adv_l3.config(text="─"); adv_l4.config(text="─")
+            adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "1.0")
+            adv_y_var.delete(0, tk.END)
         elif action == "找圖點擊 (Find&Click)":
             adv_l1.config(text="中心 X (選):"); adv_l2.config(text="中心 Y (選):")
             adv_l3.config(text="精準度 (0.7):"); adv_l4.config(text="─")
         elif action == "找圖跳轉 (Find&Jump)":
             adv_l1.config(text="精準度 (0.7):"); adv_l2.config(text="步數(正前負後):")
             adv_l3.config(text="模式 (R相對/A絕對):"); adv_l4.config(text="條件 (F有跳/N無跳):")
+            adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "0.7")
+            adv_y_var.delete(0, tk.END); adv_y_var.insert(0, "0")
+        elif action == "結束關卡 (Check Finish)":
+            adv_l1.config(text="按鈕精準度(0.7):"); adv_l2.config(text="未偵測跳轉步數:")
+            adv_l3.config(text="模式 (R相對/A絕對):"); adv_l4.config(text="─")
+            adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "0.7")
+            adv_y_var.delete(0, tk.END); adv_y_var.insert(0, "0")
+        elif action == "智能結算 (Smart Finish)":
+            adv_l1.config(text="輔助點 X:"); adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "170")
+            adv_l2.config(text="輔助點 Y:"); adv_y_var.delete(0, tk.END); adv_y_var.insert(0, "603")
+            adv_l3.config(text="終點精準度(0.6):"); adv_ex_var.delete(0, tk.END); adv_ex_var.insert(0, "0.6")
+            adv_l4.config(text="循環超時(秒):"); adv_ey_var.delete(0, tk.END); adv_ey_var.insert(0, "60")
         elif action == "偵測戰鬥 (Detect Battle)":
-            adv_l1.config(text="判定時長(秒):"); adv_l2.config(text="跳轉步數:")
+            adv_l1.config(text="判定時長(秒):"); adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "2.0")
+            adv_l2.config(text="跳轉步數:"); adv_y_var.delete(0, tk.END); adv_y_var.insert(0, "0")
             adv_l3.config(text="模式 (R相對/A絕對):"); adv_l4.config(text="─")
         elif action in ("等待進入戰鬥 (Wait Battle Start)", "等待戰鬥結束 (Wait Battle End)"):
-            adv_l1.config(text="逾時秒數:"); adv_l2.config(text="超時跳轉步數:")
+            adv_l1.config(text="逾時秒數:"); adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "60")
+            adv_l2.config(text="超時跳轉步數:"); adv_y_var.delete(0, tk.END); adv_y_var.insert(0, "0")
             adv_l3.config(text="超時是否跳 (Y/N):"); adv_l4.config(text="─")
         elif action == "戰鬥技能 (Combat Skill)":
             if adv_x_var.get() == "__CURRENT__":
@@ -551,9 +628,6 @@ def main():
             else:
                 adv_l1.config(text="預設檔名(JSON):"); adv_l2.config(text="套組名稱(@名稱):")
             adv_l3.config(text="─"); adv_l4.config(text="─")
-            btn_pick.config(text="選取技能", command=select_combat_skill_dialog, bg="#9C27B0")
-        else:
-            btn_pick.config(text="拾取點", command=pick_coordinate, bg="#E91E63")
 
     root = tk.Tk()
     root.title("LD AI Bot - 進階自動化版")
@@ -596,6 +670,7 @@ def main():
     cb_act = ttk.Combobox(f_adv_edit, textvariable=adv_action_var, values=[
         "點擊 (Click)", "滑動 (Swipe)", "等候 (Wait)",
         "找圖點擊 (Find&Click)", "找圖跳轉 (Find&Jump)",
+        "結束關卡 (Check Finish)", "智能結算 (Smart Finish)",
         "偵測戰鬥 (Detect Battle)",
         "等待進入戰鬥 (Wait Battle Start)",
         "等待戰鬥結束 (Wait Battle End)",
@@ -619,24 +694,7 @@ def main():
     adv_img_path = tk.StringVar()
     tk.Entry(f_adv_edit, textvariable=adv_img_path, width=40).grid(row=2, column=1, columnspan=3, padx=5)
     tk.Button(f_adv_edit, text="截取圖", command=pick_image, bg="#673AB7", fg="white").grid(row=2, column=4, padx=5)
-    
-    def show_all_rois_debug():
-        selected_info = get_selected_window_info()
-        if not selected_info:
-            messagebox.showwarning("警告", "請先勾選模擬器視窗")
-            return
-        hwnd = selected_info[0][1]
-        import battle_detector
-        path = battle_detector.debug_snapshot(hwnd, skill_positions=skill_positions)
-        if path:
-            append_log(f"📸 除錯截圖已生成: {os.path.basename(path)}")
-            try: os.startfile(os.path.abspath(path))
-            except: pass
-        else:
-            append_log("❌ 除錯截圖失敗")
-
-    tk.Button(f_adv_edit, text="Debug 範圍", command=show_all_rois_debug, bg="#424242", fg="white").grid(row=2, column=5, padx=5)
-    tk.Button(f_adv_edit, text="自選圖", command=select_adv_image).grid(row=2, column=6, padx=5)
+    tk.Button(f_adv_edit, text="自選圖", command=select_adv_image, bg="#FF5722", fg="white").grid(row=2, column=5, padx=5)
 
     tk.Button(f_adv_edit, text="加入步驟", command=add_adv_step, bg="#2196F3", fg="white", width=12).grid(row=0, column=6, padx=10)
     tk.Button(f_adv_edit, text="更新選中", command=update_adv_step, bg="#FF9800", fg="white", width=12).grid(row=1, column=6, padx=10)

@@ -1,0 +1,128 @@
+{
+  "type": "advanced",
+  "steps": [
+    {
+      "type": "find_click",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774616454.png",
+        "threshold": 0.5
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 4.0
+      }
+    },
+    {
+      "type": "detect_battle",
+      "params": {
+        "duration": 1.0,
+        "jump_value": -2,
+        "mode": "relative"
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 3.0
+      }
+    },
+    {
+      "type": "find_click",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774616621.png",
+        "threshold": 0.5
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 4.0
+      }
+    },
+    {
+      "type": "combat_skill",
+      "params": {
+        "preset_file": "__CURRENT__",
+        "set_name": ""
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 6.0
+      }
+    },
+    {
+      "type": "check_finish",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774802845.png",
+        "threshold": 0.6,
+        "jump_value": 1,
+        "mode": "absolute"
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 6.0
+      }
+    },
+    {
+      "type": "check_finish",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774511622.png",
+        "threshold": 0.4,
+        "jump_value": -1,
+        "mode": "relative"
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 3.0
+      }
+    },
+    {
+      "type": "smart_finish",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774512035.png",
+        "threshold": 0.5,
+        "x": 170,
+        "y": 603,
+        "timeout": 60
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 2.0
+      }
+    },
+    {
+      "type": "check_finish",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774695848.png",
+        "threshold": 0.5,
+        "jump_value": -1,
+        "mode": "relative"
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 3.0
+      }
+    },
+    {
+      "type": "check_finish",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774802845.png",
+        "threshold": 0.6,
+        "jump_value": -1,
+        "mode": "relative"
+      }
+    }
+  ]
+}

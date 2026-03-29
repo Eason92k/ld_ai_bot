@@ -4,7 +4,9 @@ import os
 import threading
 import cv2
 import numpy as np
-from ld_controller import send_click, send_swipe, get_window_screenshot
+from ld_controller import (
+    send_click, send_swipe, send_key, get_window_screenshot, find_sub_window
+)
 from battle_detector import (
     is_in_battle, get_battle_state, wait_for_battle_start, wait_for_battle_end, debug_snapshot
 )
@@ -161,6 +163,65 @@ class AdvancedActionPlayer:
                     return target_idx
                 else:
                     self.log(f"    × 未達成跳轉條件，繼續下一步")
+
+        # ── 結束關卡：判定是否有出現結束按鈕，若無則跳轉 ────────────────
+        elif action_type == "check_finish":
+            template_path = params.get('template')
+            threshold = params.get('threshold', 0.7)
+            jump_val = params.get('jump_value', 0)
+            mode = params.get('mode', 'relative')
+            
+            # 使用遍歷模式，確保勾選的所有窗口（包含單窗）都執行
+            for title, hwnd in target_windows:
+                if not self.playing: break
+                found_pos = self.find_image(hwnd, template_path, threshold)
+                
+                if found_pos:
+                    self.log(f"    ✓ [{title}] 偵測到結束按鈕 {found_pos}，執行點擊")
+                    # 💡 依照用戶要求，鎖定主視窗 hwnd 進行點擊，對齊手動步驟
+                    send_click(hwnd, found_pos[0], found_pos[1])
+                else:
+                    if mode == 'relative':
+                        target_idx = current_index + jump_val
+                    else:
+                        target_idx = jump_val - 1
+                    target_idx = max(0, min(target_idx, len(self.steps)))
+                    self.log(f"    × [{title}] 未偵測到結束按鈕，跳轉至步驟 {target_idx + 1}")
+                    return target_idx
+
+        # ── 智能結算循環：直到看到終點圖才停止 ────────────────────────
+        elif action_type == "smart_finish":
+            end_template = params.get('template')
+            threshold = params.get('threshold', 0.7)
+            click_x = params.get('x', 170)
+            click_y = params.get('y', 603)
+            max_wait = params.get('timeout', 60)
+            
+            self.log(f"  ➜ 進入智能結算循環 (最多 {max_wait}s)...")
+            start_time = time.time()
+            success_count = 0
+            
+            while time.time() - start_time < max_wait:
+                if not self.playing: break
+                
+                all_finished = True
+                for title, hwnd in target_windows:
+                    # 1. 檢查是否到終點了
+                    found_end = self.find_image(hwnd, end_template, threshold)
+                    if found_end:
+                        self.log(f"    🏁 [{title}] 偵測到終點圖片 {found_end}，點擊結算！")
+                        send_click(hwnd, found_end[0], found_end[1])
+                        success_count += 1
+                        continue # 此視窗完成，換下一個
+                    
+                    # 2. 沒到終點，點擊輔助區
+                    all_finished = False
+                    self.log(f"    ➜ [{title}] 結算中... 點擊輔助區 ({click_x}, {click_y})")
+                    send_click(hwnd, click_x, click_y)
+                
+                if all_finished and len(target_windows) > 0:
+                    break
+                time.sleep(3)
 
         # ── 偵測戰鬥：判定是否有計時器，若無則執行跳轉 ───────────────
         elif action_type == "detect_battle":
