@@ -440,12 +440,33 @@ def main():
                     im = get_window_screenshot(found_hwnd)
                     if im:
                         size = 30
-                        crop = im.crop((max(0, rel_x-size), max(0, rel_y-size), min(im.size[0], rel_x+size), min(im.size[1], rel_y+size)))
+                        left, top = max(0, rel_x-size), max(0, rel_y-size)
+                        right, bottom = min(im.size[0], rel_x+size), min(im.size[1], rel_y+size)
+                        crop = im.crop((left, top, right, bottom))
                         folder = "scripts/advanced/assets"
                         if not os.path.exists(folder): os.makedirs(folder)
-                        path = os.path.join(folder, f"template_{int(time.time())}.png")
+                        
+                        ts = int(time.time())
+                        path = os.path.join(folder, f"template_{ts}.png")
                         crop.save(path)
-                        adv_img_path.set(path); append_log(f"✓ 已擷取樣板圖: {os.path.basename(path)}")
+                        
+                        # --- 除錯用的全圖標記 ---
+                        import cv2
+                        import numpy as np
+                        img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+                        cv2.rectangle(img_bgr, (left, top), (right, bottom), (0, 0, 255), 2)
+                        cv2.putText(img_bgr, f"Template Capture Area", (left, top - 10), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                        debug_path = os.path.join(folder, f"capture_debug_{ts}.png")
+                        cv2.imwrite(debug_path, img_bgr)
+                        
+                        adv_img_path.set(path)
+                        append_log(f"✓ 已擷取樣板圖: {os.path.basename(path)}")
+                        append_log(f"🔍 已生成範圍標記圖: {os.path.basename(debug_path)}")
+                        
+                        # 自動打開標記圖供確認
+                        try: os.startfile(os.path.abspath(debug_path))
+                        except: pass
                     else: append_log("× 截圖失敗")
                 else: append_log("× 未能識別模擬器視窗")
                 return False
@@ -598,7 +619,24 @@ def main():
     adv_img_path = tk.StringVar()
     tk.Entry(f_adv_edit, textvariable=adv_img_path, width=40).grid(row=2, column=1, columnspan=3, padx=5)
     tk.Button(f_adv_edit, text="截取圖", command=pick_image, bg="#673AB7", fg="white").grid(row=2, column=4, padx=5)
-    tk.Button(f_adv_edit, text="自選圖", command=select_adv_image).grid(row=2, column=5, padx=5)
+    
+    def show_all_rois_debug():
+        selected_info = get_selected_window_info()
+        if not selected_info:
+            messagebox.showwarning("警告", "請先勾選模擬器視窗")
+            return
+        hwnd = selected_info[0][1]
+        import battle_detector
+        path = battle_detector.debug_snapshot(hwnd, skill_positions=skill_positions)
+        if path:
+            append_log(f"📸 除錯截圖已生成: {os.path.basename(path)}")
+            try: os.startfile(os.path.abspath(path))
+            except: pass
+        else:
+            append_log("❌ 除錯截圖失敗")
+
+    tk.Button(f_adv_edit, text="Debug 範圍", command=show_all_rois_debug, bg="#424242", fg="white").grid(row=2, column=5, padx=5)
+    tk.Button(f_adv_edit, text="自選圖", command=select_adv_image).grid(row=2, column=6, padx=5)
 
     tk.Button(f_adv_edit, text="加入步驟", command=add_adv_step, bg="#2196F3", fg="white", width=12).grid(row=0, column=6, padx=10)
     tk.Button(f_adv_edit, text="更新選中", command=update_adv_step, bg="#FF9800", fg="white", width=12).grid(row=1, column=6, padx=10)

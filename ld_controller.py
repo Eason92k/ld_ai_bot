@@ -141,8 +141,9 @@ def get_window_screenshot(hwnd):
         
         # 獲取目標區域寬高
         rect = win32gui.GetClientRect(target_hwnd)
-        w = rect[2] - rect[0]
-        h = rect[3] - rect[1]
+        wr = win32gui.GetWindowRect(hwnd) # 獲取主視窗總矩陣
+        w = rect[2] - rect[0] # 維持 X 軸寬度 (X軸絕對不動)
+        h = wr[3] - wr[1]     # 將 Y 軸向下延伸，包含原本被切掉的底部
 
         hwndDC = win32gui.GetWindowDC(target_hwnd)
         mfcDC  = win32ui.CreateDCFromHandle(hwndDC)
