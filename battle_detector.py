@@ -101,12 +101,18 @@ def _is_pure_timer_roi(roi, log_prefix="", log_fn=None) -> bool:
     _, white_mask = cv2.threshold(gray, 185, 255, cv2.THRESH_BINARY)
     white_ratio = np.count_nonzero(white_mask) / roi_size
     
+    # 3. 偵測「高彩度鮮豔彩色」像素（避開 Buff 圖示與彩色背景）
+    # 鮮豔色彩：彩度 S >= 120 且 亮度 V >= 120
+    vivid_mask = cv2.inRange(hsv, np.array([0, 120, 120]), np.array([180, 255, 255]))
+    vivid_ratio = np.count_nonzero(vivid_mask) / roi_size
+    
     # 綜合判定
     is_pure = purity >= TIMER_PURITY_THRESHOLD
     has_black = black_ratio >= TIMER_BLACK_RATIO_MIN
     has_white = TIMER_WHITE_RATIO_MIN <= white_ratio <= TIMER_WHITE_RATIO_MAX
+    is_not_vivid = vivid_ratio < 0.08  # 鮮豔色彩比例需小於 8%
     
-    is_detected = is_pure and has_black and has_white
+    is_detected = is_pure and has_black and has_white and is_not_vivid
     
     if log_fn:
         res_tag = "[V] 成功" if is_detected else "[X] 失敗"
@@ -114,8 +120,9 @@ def _is_pure_timer_roi(roi, log_prefix="", log_fn=None) -> bool:
         if not is_pure: reasons.append(f"純度不足({purity:.1%}<{TIMER_PURITY_THRESHOLD:.0%})")
         if not has_black: reasons.append(f"黑底不足({black_ratio:.1%}<{TIMER_BLACK_RATIO_MIN:.0%})")
         if not has_white: reasons.append(f"白字異常({white_ratio:.1%},門檻:{TIMER_WHITE_RATIO_MIN:.1%}-{TIMER_WHITE_RATIO_MAX:.1%})")
+        if not is_not_vivid: reasons.append(f"鮮豔色彩過多({vivid_ratio:.1%}>=8.0%)")
         
-        detail_str = f"純度:{purity:.1%}, 黑底:{black_ratio:.1%}, 白字:{white_ratio:.1%}"
+        detail_str = f"純度:{purity:.1%}, 黑底:{black_ratio:.1%}, 白字:{white_ratio:.1%}, 鮮豔色:{vivid_ratio:.1%}"
         if reasons:
             detail_str += f" | 原因: {', '.join(reasons)}"
         safe_log(f"  [{log_prefix}] {res_tag} | {detail_str}", log_fn)
