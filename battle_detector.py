@@ -18,21 +18,17 @@ from ld_controller import get_window_screenshot
 
 
 # ─── 可調整的超參數 ──────────────────────────────────────────────
-# 計時器偵測：右上角 ROI (依據最新截圖微調)
-TIMER_ROI_LEFT   = 0.8   # 重新向右微調 1%
-TIMER_ROI_RIGHT  = 1
+# 計時器偵測：右上角 ROI (擴大左界包覆完整 ⏱ 02:07 / 04:30 計時器條)
+TIMER_ROI_LEFT   = 0.67   # 向左擴大至 67%，完全包覆計時圖示與時間
+TIMER_ROI_RIGHT  = 0.98   # 右邊界切除非計時器背景
 
 # --- 一般戰鬥位置 (藍框) ---
-TIMER_NORMAL_ROI_TOP    = 0.118  # 微調向上：精準對齊無橫幅計時器
-TIMER_NORMAL_ROI_BOTTOM = 0.143   
+TIMER_NORMAL_ROI_TOP    = 0.115  # 精準對齊橫條 upper boundary
+TIMER_NORMAL_ROI_BOTTOM = 0.145   # 精準對齊橫條 lower boundary
 
 # --- 稀有怪位置 (綠框) ---
-TIMER_RARE_ROI_TOP      = 0.150  # 微調向上：精準對齊有橫幅計時器
-TIMER_RARE_ROI_BOTTOM   = 0.175
-
-# 計時器：白色像素比例閾值（修正為更有彈性的區間，捕捉數字但排除大片白色）
-TIMER_WHITE_RATIO_MIN = 0.005  # 最少要有 0.5% 白色 (確保有數字)
-TIMER_WHITE_RATIO_MAX = 0.12   # 超過 12% 判定為背景雜訊 (例如天空或雲)
+TIMER_RARE_ROI_TOP      = 0.150  # 稀有怪橫幅下的計時器位置
+TIMER_RARE_ROI_BOTTOM   = 0.180
 
 # 底部提示文字偵測：底部 ROI
 TEXT_ROI_LEFT   = 0.06
@@ -41,21 +37,20 @@ TEXT_ROI_RIGHT  = 0.78
 TEXT_ROI_BOTTOM = 0.88
 
 # --- 判定閥值 ---
-# 無色彩純度門檻 (黑白灰佔比)：從 20% 微調至 25% (進一步過濾背景)
-TIMER_PURITY_THRESHOLD = 0.25
-# 深色底色佔比
-TIMER_BLACK_RATIO_MIN  = 0.2
-# 白色數字佔比：提高至 8% (排除任務文字 5.7%，鎖定計時器 12-14%)
-TIMER_WHITE_RATIO_MIN  = 0.08
-# 白色比例上限 (雜訊過濾)
-TIMER_WHITE_RATIO_MAX  = 0.25
+# 無色彩純度門檻 (黑白灰佔比)：20% (過濾鮮艷背景)
+TIMER_PURITY_THRESHOLD = 0.20
+# 深色底色佔比：10% (容許半透明黑底 gradient 與黑框)
+TIMER_BLACK_RATIO_MIN  = 0.10
+# 白色數字佔比：放寬至 2% ~ 30% (捕捉細數字與圖示)
+TIMER_WHITE_RATIO_MIN  = 0.02
+TIMER_WHITE_RATIO_MAX  = 0.30
 
 # 橘黃色 HSV 範圍（"タップで戦"黃色文字）
 TEXT_HSV_LOWER = np.array([15,  120, 120], dtype=np.uint8)
 TEXT_HSV_UPPER = np.array([40,  255, 255], dtype=np.uint8)
 
 # 底部提示：橘黃色像素比例閾值
-TEXT_YELLOW_RATIO_THRESHOLD = 0.03  # 提高到 3%
+TEXT_YELLOW_RATIO_THRESHOLD = 0.03  # 3%
 # ─────────────────────────────────────────────────────────────────
 
 
@@ -65,6 +60,20 @@ def _crop_roi(img_bgr, left_r, top_r, right_r, bottom_r):
     x1, y1 = int(w * left_r),  int(h * top_r)
     x2, y2 = int(w * right_r), int(h * bottom_r)
     return img_bgr[y1:y2, x1:x2]
+
+
+def safe_log(msg, log_fn=print):
+    """安全輸出 Log，防止 Windows CP950 終端機編碼報錯"""
+    import sys
+    try:
+        log_fn(msg)
+    except Exception:
+        try:
+            enc = sys.stdout.encoding or 'cp950'
+            clean_msg = msg.encode(enc, errors='replace').decode(enc)
+            log_fn(clean_msg)
+        except Exception:
+            print(str(msg).encode('ascii', 'replace').decode('ascii'))
 
 
 def _is_pure_timer_roi(roi, log_prefix="", log_fn=None) -> bool:
@@ -77,7 +86,7 @@ def _is_pure_timer_roi(roi, log_prefix="", log_fn=None) -> bool:
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     
-    # 1. 偵測「無色彩 (Achromatic)」像素：彩度 (S) 低於 70 視為黑白灰 (放寬以包含微藍的陰影)
+    # 1. 偵測「無色彩 (Achromatic)」像素：彩度 (S) 低於 70 視為黑白灰
     monochrome_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 70, 255]))
     monochrome_count = np.count_nonzero(monochrome_mask)
     roi_size = monochrome_mask.size
@@ -100,9 +109,16 @@ def _is_pure_timer_roi(roi, log_prefix="", log_fn=None) -> bool:
     is_detected = is_pure and has_black and has_white
     
     if log_fn:
-        res_tag = "✓ 成功" if is_detected else "× 失敗"
-        purity_info = f"純度:{purity:.1%}" if is_pure else f"雜質多({purity:.1%})"
-        log_fn(f"  [{log_prefix}] {res_tag} | {purity_info} | 黑底:{black_ratio:.1%}, 白字:{white_ratio:.1%}")
+        res_tag = "[V] 成功" if is_detected else "[X] 失敗"
+        reasons = []
+        if not is_pure: reasons.append(f"純度不足({purity:.1%}<{TIMER_PURITY_THRESHOLD:.0%})")
+        if not has_black: reasons.append(f"黑底不足({black_ratio:.1%}<{TIMER_BLACK_RATIO_MIN:.0%})")
+        if not has_white: reasons.append(f"白字異常({white_ratio:.1%},門檻:{TIMER_WHITE_RATIO_MIN:.1%}-{TIMER_WHITE_RATIO_MAX:.1%})")
+        
+        detail_str = f"純度:{purity:.1%}, 黑底:{black_ratio:.1%}, 白字:{white_ratio:.1%}"
+        if reasons:
+            detail_str += f" | 原因: {', '.join(reasons)}"
+        safe_log(f"  [{log_prefix}] {res_tag} | {detail_str}", log_fn)
         
     return is_detected
 
@@ -136,42 +152,19 @@ def detect_prebattle_text(hwnd) -> bool:
     return yellow_ratio >= TEXT_YELLOW_RATIO_THRESHOLD
 
 
-def _find_image_in_roi(roi_bgr, template_path, threshold=0.7, log_fn=None):
-    """在截取的 ROI 中精確尋找圖片"""
-    import cv2
-    import numpy as np
-    try:
-        if not os.path.exists(template_path): return False
-        template = cv2.imdecode(np.fromfile(template_path, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if template is None: return False
-        
-        result = cv2.matchTemplate(roi_bgr, template, cv2.TM_CCOEFF_NORMED)
-        _, max_val, _, _ = cv2.minMaxLoc(result)
-        
-        if log_fn:
-            log_fn(f"  [診斷] 區域圖標比對: 分數={max_val:.3f}, 閾值={threshold:.2f}")
-        return max_val >= threshold
-    except:
-        return False
-
 def is_in_battle(hwnd, duration=2.0, log_fn=None, roi_top=TIMER_NORMAL_ROI_TOP, roi_bottom=TIMER_NORMAL_ROI_BOTTOM) -> bool:
     """
     通用戰鬥判定：結合 ROI 圖標比對與顏色算法。
-    預設為一般位置。
     """
-    import os
     import time
-    
-    timer_path = "scripts/advanced/assets/timer.png"
     check_start = time.time()
     
-    # 為了效能，如果只是單次檢查，duration 設短一點
     while time.time() - check_start <= float(duration):
         im = get_window_screenshot(hwnd)
         if im is not None:
             img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
             roi = _crop_roi(img_bgr, TIMER_ROI_LEFT, roi_top, TIMER_ROI_RIGHT, roi_bottom)
-            if _is_pure_timer_roi(roi, log_prefix="一般判定", log_fn=log_fn):
+            if _is_pure_timer_roi(roi, log_prefix="計時器判定", log_fn=log_fn):
                 return True
         
         if duration <= 0: break # 只檢查一次
@@ -197,15 +190,12 @@ def is_in_any_battle(hwnd, duration=1.0) -> bool:
     check_start = time.time()
     
     while True:
-        # 這裡不呼叫 is_in_battle_normal/rare 以避免重複截圖，直接在同一個迴圈處理
         im = get_window_screenshot(hwnd)
         if im:
             img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
             
-            # 檢查 一般位置
             roi_normal = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_NORMAL_ROI_TOP, TIMER_ROI_RIGHT, TIMER_NORMAL_ROI_BOTTOM)
-            # 檢查 稀有位置
-            roi_rare = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_RARE_ROI_TOP, TIMER_ROI_RIGHT, TIMER_RARE_ROI_BOTTOM)
+            roi_rare   = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_RARE_ROI_TOP, TIMER_ROI_RIGHT, TIMER_RARE_ROI_BOTTOM)
             
             if _is_pure_timer_roi(roi_normal) or _is_pure_timer_roi(roi_rare):
                 return True
@@ -223,7 +213,7 @@ def is_prebattle(hwnd) -> bool:
     return False
 
 
-def get_battle_state(hwnd) -> str:
+def get_battle_state(hwnd, im=None) -> str:
     """
     回傳目前戰鬥狀態字串：
       'in_battle_normal' — 計時器在上方 (一般戰鬥)
@@ -231,10 +221,21 @@ def get_battle_state(hwnd) -> str:
       'pre_battle'       — 底部文字存在，準備進入戰鬥
       'none'             — 非戰鬥狀態
     """
-    # 優先檢查計時器位置
-    if is_in_battle_normal(hwnd, duration=0):
+    if im is None:
+        im = get_window_screenshot(hwnd)
+    if im is None:
+        return "none"
+        
+    img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+    
+    # 優先檢查一般戰鬥位置 (藍框)
+    roi_normal = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_NORMAL_ROI_TOP, TIMER_ROI_RIGHT, TIMER_NORMAL_ROI_BOTTOM)
+    if _is_pure_timer_roi(roi_normal):
         return "in_battle_normal"
-    if is_in_battle_rare(hwnd, duration=0):
+        
+    # 再檢查稀有戰鬥位置 (綠框)
+    roi_rare = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_RARE_ROI_TOP, TIMER_ROI_RIGHT, TIMER_RARE_ROI_BOTTOM)
+    if _is_pure_timer_roi(roi_rare):
         return "in_battle_rare"
     
     if is_prebattle(hwnd):
@@ -242,55 +243,96 @@ def get_battle_state(hwnd) -> str:
     return "none"
 
 
-def wait_for_battle_start(hwnd, timeout=60.0, poll_interval=0.5, log_fn=None) -> bool:
+def wait_for_battle_start(hwnd, timeout=60.0, poll_interval=0.5, log_fn=None, required_consecutive=2, cancel_check=None) -> bool:
     """
     等待直到進入戰鬥（計時器出現）或超時。
+    使用連續防誤判機制（預設連續 2 次偵測成功才確定進入戰鬥）。
+    :param cancel_check: 可選的回呼函式，回傳 True 表示外部已要求中止
     """
     import time
     elapsed = 0.0
     last_state = None
     last_log_time = 0.0
+    consecutive_count = 0
     
     while elapsed < timeout:
-        state = get_battle_state(hwnd)
+        # 檢查外部是否要求中止
+        if cancel_check and cancel_check():
+            if log_fn:
+                safe_log("  [中止] 外部要求停止，中斷等待戰鬥開始", log_fn)
+            return False
+
+        im = get_window_screenshot(hwnd)
+        state = get_battle_state(hwnd, im=im)
         
-        # 效能優化：僅在狀態改變或每 5 秒輸出一次日誌，避免刷屏
         current_time = time.time()
         if log_fn and (state != last_state or current_time - last_log_time >= 5.0):
-            log_fn(f"  🔍 戰鬥偵測: {state} ({elapsed:.1f}s)")
+            safe_log(f"  [戰鬥偵測] 狀態: {state} ({elapsed:.1f}s)", log_fn)
             last_state = state
             last_log_time = current_time
             
         if state in ["in_battle_normal", "in_battle_rare"]:
-            return True
-        if state == "pre_battle" and state != last_state:
-            if log_fn:
-                log_fn("  ⚔️ 偵測到戰前提示，等待計時器出現...")
+            consecutive_count += 1
+            if consecutive_count >= required_consecutive:
+                if log_fn:
+                    safe_log(f"  [戰鬥] 確認進入戰鬥！({state})", log_fn)
+                return True
+        else:
+            consecutive_count = 0
+            if state == "pre_battle" and state != last_state:
+                if log_fn:
+                    safe_log("  [戰鬥] 偵測到戰前提示，等待計時器出現...", log_fn)
         
         time.sleep(poll_interval)
         elapsed += poll_interval
+
     if log_fn:
-        log_fn(f"  ⚠️ 等待戰鬥開始超時 ({timeout}s)")
+        safe_log(f"  [警告] 等待戰鬥開始超時 ({timeout}s)", log_fn)
     return False
 
 
-def wait_for_battle_end(hwnd, timeout=300.0, poll_interval=1.0, log_fn=None) -> bool:
+def wait_for_battle_end(hwnd, timeout=300.0, poll_interval=1.0, log_fn=None, required_consecutive=3, cancel_check=None) -> bool:
     """
     等待直到計時器消失（戰鬥結束）或超時。
-    :return: True 表示戰鬥已結束；False 表示超時
+    使用連續防誤判機制（必須連續 3 次未偵測到計時器，約 2-3 秒，才判定為戰鬥結束）。
+    :param cancel_check: 可選的回呼函式，回傳 True 表示外部已要求中止
     """
     import time
     elapsed = 0.0
+    consecutive_no_battle = 0
+    last_log_time = 0.0
+
     while elapsed < timeout:
-        # 如果兩處都沒有計時器，視為戰鬥結束
-        if not is_in_battle_normal(hwnd, duration=0) and not is_in_battle_rare(hwnd, duration=0):
+        # 檢查外部是否要求中止
+        if cancel_check and cancel_check():
             if log_fn:
-                log_fn(f"  ✅ 戰鬥結束偵測成功 ({elapsed:.1f}s)")
-            return True
+                safe_log("  [中止] 外部要求停止，中斷等待戰鬥結束", log_fn)
+            return False
+
+        im = get_window_screenshot(hwnd)
+        state = get_battle_state(hwnd, im=im)
+        
+        current_time = time.time()
+        if state == "none":
+            consecutive_no_battle += 1
+            if log_fn and (current_time - last_log_time >= 5.0):
+                safe_log(f"  [戰鬥] 等待戰鬥結束中 (無計時器 {consecutive_no_battle}/{required_consecutive}, {elapsed:.1f}s)", log_fn)
+                last_log_time = current_time
+
+            if consecutive_no_battle >= required_consecutive:
+                if log_fn:
+                    safe_log(f"  [戰鬥] 戰鬥結束偵測成功 ({elapsed:.1f}s)", log_fn)
+                return True
+        else:
+            if consecutive_no_battle > 0 and log_fn:
+                safe_log(f"  [戰鬥] 仍偵測到戰鬥中 ({state})，重設結束計數", log_fn)
+            consecutive_no_battle = 0
+
         time.sleep(poll_interval)
         elapsed += poll_interval
+
     if log_fn:
-        log_fn(f"  ⚠️ 等待戰鬥結束超時 ({timeout}s)")
+        safe_log(f"  [警告] 等待戰鬥結束超時 ({timeout}s)", log_fn)
     return False
 
 
@@ -345,21 +387,66 @@ def debug_snapshot(hwnd, save_dir="scripts/advanced/assets", skill_positions=Non
     return path
 
 
-if __name__ == "__main__":
-    # 診斷模式：當直接執行 python battle_detector.py 時
-    print("=== 戰鬥偵測診斷模式 ===")
+def run_diagnostic_mode(log_fn=print):
+    """
+    戰鬥偵測診斷模式：分析目前所有 LDPlayer 視窗並輸出結果。
+    """
     from ld_controller import list_all_ldplayer_windows
-    import os
+    import time
+    
+    safe_log("========================================", log_fn)
+    safe_log("[診斷模式] 開始進行戰鬥偵測診斷...", log_fn)
+    safe_log("========================================", log_fn)
     
     windows = list_all_ldplayer_windows()
     if not windows:
-        print("× 未能找到任何 LDPlayer 視窗。")
-    else:
-        for title, hwnd in windows:
-            path = debug_snapshot(hwnd)
-            print(f"\n視窗 [{title}] 已存檔: {path}")
-            # 同時在控制台進行兩處位置的純度診斷
-            detect_timer(hwnd, log_fn=print, roi_top=TIMER_NORMAL_ROI_TOP, roi_bottom=TIMER_NORMAL_ROI_BOTTOM)
-            detect_timer(hwnd, log_fn=print, roi_top=TIMER_RARE_ROI_TOP, roi_bottom=TIMER_RARE_ROI_BOTTOM)
+        safe_log("[X] 未找到任何開啟中的雷電模擬器 (LDPlayer) 視窗。", log_fn)
+        return
+        
+    for title, hwnd in windows:
+        safe_log(f"\n[視窗] [{title}] (HWND: {hwnd})", log_fn)
+        path = debug_snapshot(hwnd)
+        if path:
+            safe_log(f"  [快照] 標記圖片已存檔: {path}", log_fn)
             
-        print("\n📢 請檢查上述圖片中的藍框是否正確套住了計時器。")
+        im = get_window_screenshot(hwnd)
+        if im is None:
+            safe_log("  [X] 截圖失敗，無法讀取畫面", log_fn)
+            continue
+            
+        img_bgr = cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
+        
+        safe_log("  --- 一般計時器區域 (藍框) ---", log_fn)
+        roi_normal = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_NORMAL_ROI_TOP, TIMER_ROI_RIGHT, TIMER_NORMAL_ROI_BOTTOM)
+        _is_pure_timer_roi(roi_normal, log_prefix="一般位置", log_fn=log_fn)
+        
+        safe_log("  --- 稀有計時器區域 (綠框) ---", log_fn)
+        roi_rare = _crop_roi(img_bgr, TIMER_ROI_LEFT, TIMER_RARE_ROI_TOP, TIMER_ROI_RIGHT, TIMER_RARE_ROI_BOTTOM)
+        _is_pure_timer_roi(roi_rare, log_prefix="稀有位置", log_fn=log_fn)
+        
+        state = get_battle_state(hwnd, im=im)
+        state_map = {
+            "in_battle_normal": "[戰鬥] 一般戰鬥中 (Normal)",
+            "in_battle_rare":   "[戰鬥] 稀有戰鬥中 (Rare)",
+            "pre_battle":       "[等待] 準備進入戰鬥 (Pre-Battle)",
+            "none":             "[停止] 非戰鬥狀態 (None)"
+        }
+        safe_log(f"  [狀態] 綜合判定: {state_map.get(state, state)}", log_fn)
+    safe_log("\n========================================\n", log_fn)
+
+
+if __name__ == "__main__":
+    import sys
+    run_diagnostic_mode(log_fn=print)
+    print("\n提示：若要開啟即時動態監控診斷，請按 Enter 鍵 (或 Ctrl+C 結束)...")
+    try:
+        input()
+        print("開始即時動態監控 (每 1 秒更新一次，Ctrl+C 中止)...")
+        import time
+        while True:
+            run_diagnostic_mode(log_fn=print)
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        print("\n診斷結束。")
+
+

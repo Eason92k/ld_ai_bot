@@ -1,0 +1,49 @@
+{
+  "type": "advanced",
+  "steps": [
+    {
+      "type": "wait_battle_start",
+      "params": {
+        "timeout": 60.0,
+        "poll_interval": 1.0,
+        "on_timeout_jump": true,
+        "jump_value": -1
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 3.0
+      }
+    },
+    {
+      "type": "click",
+      "params": {
+        "x": 286,
+        "y": 328
+      }
+    },
+    {
+      "type": "wait",
+      "params": {
+        "seconds": 1.0
+      }
+    },
+    {
+      "type": "combat_skill",
+      "params": {
+        "preset_file": "技能預設.json",
+        "set_name": "鐮刀"
+      }
+    },
+    {
+      "type": "wait_battle_end",
+      "params": {
+        "timeout": 60.0,
+        "poll_interval": 1.0,
+        "on_timeout_jump": false,
+        "jump_value": 0
+      }
+    }
+  ]
+}

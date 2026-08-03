@@ -2,9 +2,24 @@
   "type": "advanced",
   "steps": [
     {
+      "type": "wait",
+      "params": {
+        "seconds": 3.0
+      }
+    },
+    {
+      "type": "check_finish",
+      "params": {
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774949019.png",
+        "threshold": 0.4,
+        "jump_value": -1,
+        "mode": "relative"
+      }
+    },
+    {
       "type": "find_click",
       "params": {
-        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774616454.png",
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774691363.png",
         "threshold": 0.5
       }
     },
@@ -31,7 +46,7 @@
     {
       "type": "find_click",
       "params": {
-        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774616621.png",
+        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774948724.png",
         "threshold": 0.5
       }
     },
@@ -44,23 +59,8 @@
     {
       "type": "combat_skill",
       "params": {
-        "preset_file": "__CURRENT__",
-        "set_name": ""
-      }
-    },
-    {
-      "type": "wait",
-      "params": {
-        "seconds": 6.0
-      }
-    },
-    {
-      "type": "check_finish",
-      "params": {
-        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774802845.png",
-        "threshold": 0.6,
-        "jump_value": 1,
-        "mode": "absolute"
+        "preset_file": "技能預設.json",
+        "set_name": "劍姬"
       }
     },
     {
@@ -105,21 +105,6 @@
       "params": {
         "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774695848.png",
         "threshold": 0.5,
-        "jump_value": -1,
-        "mode": "relative"
-      }
-    },
-    {
-      "type": "wait",
-      "params": {
-        "seconds": 3.0
-      }
-    },
-    {
-      "type": "check_finish",
-      "params": {
-        "template": "C:/Users/eason/OneDrive/桌面/ld_ai_bot/scripts/advanced/assets/template_1774802845.png",
-        "threshold": 0.6,
         "jump_value": -1,
         "mode": "relative"
       }

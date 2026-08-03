@@ -185,7 +185,6 @@ def main():
             "找圖跳轉 (Find&Jump)": "find_jump",
             "結束關卡 (Check Finish)": "check_finish",
             "智能結算 (Smart Finish)": "smart_finish",
-            "偵測戰鬥 (Detect Battle)": "detect_battle",
             "等待進入戰鬥 (Wait Battle Start)": "wait_battle_start",
             "等待戰鬥結束 (Wait Battle End)": "wait_battle_end",
             "戰鬥技能 (Combat Skill)": "combat_skill"
@@ -227,21 +226,33 @@ def main():
                     "y": int(adv_y_var.get() or "603"),
                     "timeout": int(adv_ey_var.get() or "60")
                 }
-            elif stype == "detect_battle":
-                params = {
-                    "duration": float(adv_x_var.get() or "2.0"),
-                    "jump_value": int(adv_y_var.get() or "0"),
-                    "mode": 'absolute' if adv_ex_var.get().upper() == 'A' else 'relative'
-                }
-            elif stype in ("wait_battle_start", "wait_battle_end"):
+            elif stype == "wait_battle_start":
+                ex_val = adv_ex_var.get().upper().strip()
+                jump_mode = 'none'
+                if ex_val == 'R':
+                    jump_mode = 'relative'
+                elif ex_val == 'A':
+                    jump_mode = 'absolute'
                 params = {
                     "timeout": float(adv_x_var.get() or "60"),
+                    "poll_interval": 1.0,
+                    "jump_mode": jump_mode,
+                    "jump_value": int(adv_y_var.get() or "0")
+                }
+            elif stype == "wait_battle_end":
+                params = {
+                    "timeout": float(adv_x_var.get() or "300"),
                     "poll_interval": 1.0,
                     "on_timeout_jump": adv_ex_var.get().upper() == 'Y',
                     "jump_value": int(adv_y_var.get() or "0")
                 }
             elif stype == "combat_skill":
-                params = {"preset_file": adv_x_var.get().strip(), "set_name": adv_y_var.get().strip()}
+                auto_cycle = adv_ex_var.get().upper().strip() != 'N'
+                params = {
+                    "preset_file": adv_x_var.get().strip(),
+                    "set_name": adv_y_var.get().strip(),
+                    "auto_cycle": auto_cycle
+                }
             return stype, params
         except Exception as e:
             append_log(f"⚠️ 參數格式錯誤: {e}")
@@ -265,9 +276,10 @@ def main():
             adv_player.add_step(stype, params)
             update_adv_list()
             if stype == "wait": append_log(f"加入等候：{params['seconds']} 秒")
-            elif stype == "combat_skill": append_log(f"加入戰鬥技能：檔={params['preset_file']}, 套組={params['set_name']}")
-            elif stype == "detect_battle": append_log(f"加入戰鬥跳轉：若 {params['duration']}s 內無計時器則跳轉 {params['jump_value']} 步")
-            elif stype == "wait_battle_start": append_log(f"加入等待進入戰鬥：timeout={params['timeout']}s, 超時跳={params['on_timeout_jump']}")
+            elif stype == "combat_skill":
+                auto_str = "開啟" if params.get('auto_cycle', True) else "關閉"
+                append_log(f"加入戰鬥技能：檔={params['preset_file']}, 套組={params['set_name']}, 自動循環={auto_str}")
+            elif stype == "wait_battle_start": append_log(f"加入等待進入戰鬥：timeout={params['timeout']}s, 模式={params['jump_mode']}, 跳轉步數={params['jump_value']}")
             elif stype == "wait_battle_end": append_log(f"加入等待戰鬥結束：timeout={params['timeout']}s, 超時跳={params['on_timeout_jump']}")
             elif stype == "check_finish": append_log(f"加入結束關卡：圖={os.path.basename(params['template'])}, 沒圖則跳={params['jump_value']}")
             elif stype == "smart_finish": append_log(f"加入智能結算：終點={os.path.basename(params['template'])}, 輔助={params['x']},{params['y']}")
@@ -322,7 +334,7 @@ def main():
             "find_jump": "找圖跳轉 (Find&Jump)",
             "check_finish": "結束關卡 (Check Finish)",
             "smart_finish": "智能結算 (Smart Finish)",
-            "detect_battle": "偵測戰鬥 (Detect Battle)",
+            "detect_battle": "等待進入戰鬥 (Wait Battle Start)", # 舊版自動對應
             "wait_battle_start": "等待進入戰鬥 (Wait Battle Start)",
             "wait_battle_end": "等待戰鬥結束 (Wait Battle End)",
             "combat_skill": "戰鬥技能 (Combat Skill)"
@@ -354,11 +366,23 @@ def main():
                 adv_ex_var.insert(0, 'A' if params.get('mode') == 'absolute' else 'R')
                 adv_ey_var.insert(0, 'N' if params.get('condition') == 'if_not_found' else 'F')
             elif stype == "detect_battle":
+                # 將舊版偵測戰鬥參數載入並轉換為新版欄位
                 adv_x_var.insert(0, str(params.get('duration', '2.0')))
                 adv_y_var.insert(0, str(params.get('jump_value', '0')))
                 adv_ex_var.insert(0, 'A' if params.get('mode') == 'absolute' else 'R')
-            elif stype in ("wait_battle_start", "wait_battle_end"):
-                adv_x_var.insert(0, str(params.get('timeout', '')))
+            elif stype == "wait_battle_start":
+                adv_x_var.insert(0, str(params.get('timeout', '60')))
+                adv_y_var.insert(0, str(params.get('jump_value', '0')))
+                # 回填新欄位: R/A/N
+                jmode = params.get('jump_mode', 'none')
+                if jmode == 'relative':
+                    adv_ex_var.insert(0, 'R')
+                elif jmode == 'absolute':
+                    adv_ex_var.insert(0, 'A')
+                else:
+                    adv_ex_var.insert(0, 'N')
+            elif stype == "wait_battle_end":
+                adv_x_var.insert(0, str(params.get('timeout', '300')))
                 adv_y_var.insert(0, str(params.get('jump_value', '0')))
                 adv_ex_var.insert(0, 'Y' if params.get('on_timeout_jump') else 'N')
             elif stype == "check_finish":
@@ -375,6 +399,7 @@ def main():
             elif stype == "combat_skill":
                 adv_x_var.insert(0, params.get('preset_file', ''))
                 adv_y_var.insert(0, params.get('set_name', ''))
+                adv_ex_var.insert(0, 'Y' if params.get('auto_cycle', True) else 'N')
             
             append_log(f"已回填步驟 {index + 1} 參數")
 
@@ -568,11 +593,19 @@ def main():
     def update_adv_ui_labels(*args):
         action = adv_action_var.get()
         
+        # 先記住「戰鬥技能」是否為動態套用，再清除所有欄位避免殘留
+        is_current_preset = (action == "戰鬥技能 (Combat Skill)" and adv_x_var.get() == "__CURRENT__")
+        
+        adv_x_var.delete(0, tk.END)
+        adv_y_var.delete(0, tk.END)
+        adv_ex_var.delete(0, tk.END)
+        adv_ey_var.delete(0, tk.END)
+        
         # 1. 動作分類
         coord_actions = ("點擊 (Click)", "滑動 (Swipe)", "找圖點擊 (Find&Click)", "智能結算 (Smart Finish)")
         skill_actions = ("戰鬥技能 (Combat Skill)",)
         
-        # 2. 先更新按鈕狀態與預設標籤（讓所有 elif 共享這個基準）
+        # 2. 先更新按鈕狀態與預設標籤
         if 'btn_pick' in locals() or 'btn_pick' in globals() or 'btn_pick' in vars():
             try:
                 if action in coord_actions:
@@ -613,21 +646,24 @@ def main():
             adv_l2.config(text="輔助點 Y:"); adv_y_var.delete(0, tk.END); adv_y_var.insert(0, "603")
             adv_l3.config(text="終點精準度(0.6):"); adv_ex_var.delete(0, tk.END); adv_ex_var.insert(0, "0.6")
             adv_l4.config(text="循環超時(秒):"); adv_ey_var.delete(0, tk.END); adv_ey_var.insert(0, "60")
-        elif action == "偵測戰鬥 (Detect Battle)":
-            adv_l1.config(text="判定時長(秒):"); adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "2.0")
-            adv_l2.config(text="跳轉步數:"); adv_y_var.delete(0, tk.END); adv_y_var.insert(0, "0")
-            adv_l3.config(text="模式 (R相對/A絕對):"); adv_l4.config(text="─")
-        elif action in ("等待進入戰鬥 (Wait Battle Start)", "等待戰鬥結束 (Wait Battle End)"):
-            adv_l1.config(text="逾時秒數:"); adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "60")
+        elif action == "等待進入戰鬥 (Wait Battle Start)":
+            adv_l1.config(text="偵測/逾時秒數:"); adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "60")
+            adv_l2.config(text="跳轉步數(無則0):"); adv_y_var.delete(0, tk.END); adv_y_var.insert(0, "0")
+            adv_l3.config(text="跳轉模式(R/A/N):"); adv_ex_var.delete(0, tk.END); adv_ex_var.insert(0, "N")
+            adv_l4.config(text="─")
+        elif action == "等待戰鬥結束 (Wait Battle End)":
+            adv_l1.config(text="逾時秒數:"); adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "300")
             adv_l2.config(text="超時跳轉步數:"); adv_y_var.delete(0, tk.END); adv_y_var.insert(0, "0")
-            adv_l3.config(text="超時是否跳 (Y/N):"); adv_l4.config(text="─")
+            adv_l3.config(text="超時是否跳 (Y/N):"); adv_ex_var.delete(0, tk.END); adv_ex_var.insert(0, "N")
+            adv_l4.config(text="─")
         elif action == "戰鬥技能 (Combat Skill)":
-            if adv_x_var.get() == "__CURRENT__":
+            if is_current_preset:
                 adv_l1.config(text="預設檔名:"); adv_x_var.delete(0, tk.END); adv_x_var.insert(0, "__CURRENT__")
                 adv_l2.config(text="套組名稱:"); adv_y_var.delete(0, tk.END); adv_y_var.insert(0, "(動態讀取)")
             else:
                 adv_l1.config(text="預設檔名(JSON):"); adv_l2.config(text="套組名稱(@名稱):")
-            adv_l3.config(text="─"); adv_l4.config(text="─")
+            adv_l3.config(text="自動循環(Y/N):"); adv_ex_var.delete(0, tk.END); adv_ex_var.insert(0, "Y")
+            adv_l4.config(text="─")
 
     root = tk.Tk()
     root.title("LD AI Bot - 進階自動化版")
@@ -671,7 +707,6 @@ def main():
         "點擊 (Click)", "滑動 (Swipe)", "等候 (Wait)",
         "找圖點擊 (Find&Click)", "找圖跳轉 (Find&Jump)",
         "結束關卡 (Check Finish)", "智能結算 (Smart Finish)",
-        "偵測戰鬥 (Detect Battle)",
         "等待進入戰鬥 (Wait Battle Start)",
         "等待戰鬥結束 (Wait Battle End)",
         "戰鬥技能 (Combat Skill)",
@@ -979,7 +1014,18 @@ def main():
         append_log("🔍 技能亮度偵測:")
         detector.debug_brightness(hwnd, ids_to_check, log_fn=append_log)
 
+    # ── 戰鬥判定診斷 ──
+    def debug_battle():
+        from battle_detector import run_diagnostic_mode
+        selected_info = get_selected_window_info()
+        if not selected_info:
+            messagebox.showwarning("警告", "請先勾選模擬器視窗")
+            return
+        append_log("🔍 開始進行戰鬥判定診斷...")
+        threading.Thread(target=run_diagnostic_mode, kwargs={"log_fn": append_log}, daemon=True).start()
+
     tk.Button(f_skill_settings, text="亮度測試", command=debug_brightness, bg="#607D8B", fg="white", width=8).pack(side="left", padx=5)
+    tk.Button(f_skill_settings, text="戰鬥診斷", command=debug_battle, bg="#9C27B0", fg="white", width=8).pack(side="left", padx=5)
 
     # ── 儲存/載入/執行控制 ──
     f_skill_ctrl = tk.Frame(tab3)

@@ -23,7 +23,7 @@ import re
 import cv2
 import numpy as np
 from ld_controller import send_click, get_window_screenshot
-from battle_detector import is_in_any_battle
+from battle_detector import is_in_any_battle, get_battle_state
 
 
 # ─── 所有合法的技能 ID ────────────────────────────────
@@ -381,12 +381,13 @@ class SkillPresetPlayer:
         """設定技能座標"""
         self.cd_detector.positions = positions
 
-    def play(self, target_windows, preset_data: dict):
+    def play(self, target_windows, preset_data: dict, auto_cycle: bool = True):
         """
         主執行迴圈。
         
         target_windows: [(title, hwnd), ...]
         preset_data: 解析後的單一套組 {"name": ..., "groups": [...]}
+        auto_cycle: 施放完自訂技能組後是否進入 Phase 2 自動循環
         """
         if not target_windows:
             self.log("✗ 無目標視窗")
@@ -480,10 +481,18 @@ class SkillPresetPlayer:
             self.log("=== 技能預設已停止 ===")
             return
 
+        # 檢查是否開啟 Phase 2 自動循環
+        if not auto_cycle:
+            self.playing = False
+            self.log("=== 技能預設執行完畢 (不自動循環) ===")
+            return
+
         # ── Phase 2: 自動循環 ──
         self.log("── Phase 2: 自動循環（按亮起技能） ──")
-        # 按 1→2→3→4→5→6→a→b→c→d→e→f 的固定順序
-        cycle_order = [s for s in "123456abcdef" if s in all_skill_ids]
+        # 按 1→2→3→4→5→6 的固定順序，僅監控 1~6 武器技能
+        cycle_order = [s for s in "123456" if s in self.cd_detector.positions]
+        if not cycle_order:
+            cycle_order = [s for s in "123456" if s in VALID_SKILL_IDS]
         
         if not cycle_order:
             self.log("  ⚠️ 無技能可循環")
@@ -492,24 +501,38 @@ class SkillPresetPlayer:
 
         self.log(f"  循環技能: {', '.join(cycle_order)}")
 
+        consecutive_no_battle = 0
+        REQUIRED_END_COUNT = 3  # 連續 3 次無計時器才確認戰鬥結束
+
         while self.playing:
-            # 戰鬥中檢測 (循環模式建議維持較短偵測以利快速反應)
+            # 戰鬥中檢測：連續防誤判機制
             if self.battle_only:
-                if not is_in_any_battle(main_hwnd, duration=0.6):
-                    self.log("  ⚠️ 戰鬥結束，停止施放")
-                    break
+                im = get_window_screenshot(main_hwnd)
+                state = get_battle_state(main_hwnd, im=im)
+                if state in ("in_battle_normal", "in_battle_rare"):
+                    consecutive_no_battle = 0  # 有看到計時器，重設計數
+                else:
+                    consecutive_no_battle += 1
+                    if consecutive_no_battle >= REQUIRED_END_COUNT:
+                        self.log("  ⚠️ 戰鬥結束，停止施放")
+                        break
 
             # 批量偵測哪些技能亮了
             ready_skills = self.cd_detector.get_ready_skills(main_hwnd, cycle_order)
 
             if ready_skills:
+                casted_this_round = []
                 for skill_id in cycle_order:
                     if not self.playing:
                         break
                     if skill_id in ready_skills:
-                        # 修改：傳入完整的 target_windows (包含標題)
                         self._cast_skill(target_windows, skill_id)
+                        casted_this_round.append(skill_id)
                         time.sleep(self.cast_interval)
+                
+                # 本輪有施放技能，等待這些技能佇列清空（施放完成）才進行下一輪
+                if casted_this_round and self.playing:
+                    self.wait_for_queue_clear(main_hwnd, casted_this_round, timeout=10.0)
             else:
                 time.sleep(0.3)  # 沒有技能亮，短暫等待
 
@@ -535,30 +558,25 @@ class SkillPresetPlayer:
         if not self.playing:
             return
             
-        # 緩衝延遲，等待標籤出現
-        time.sleep(1.0)
+        time.sleep(0.5)
         start_wait = time.time()
         
         while time.time() - start_wait < timeout and self.playing:
-            # 戰鬥中檢測
-            if self.battle_only and not is_in_any_battle(hwnd, duration=0.5):
-                time.sleep(0.5)
-                if not is_in_any_battle(hwnd, duration=0.5):
+            # 戰鬥狀態檢測：非戰鬥狀態立刻退出
+            if self.battle_only:
+                state = get_battle_state(hwnd)
+                if state not in ("in_battle_normal", "in_battle_rare"):
                     self.playing = False
                     return
                 
             blocking_map = self.cd_detector.get_queued_skills_info(hwnd, skill_ids)
             if not blocking_map:
-                # 再次確認
-                time.sleep(0.3)
+                time.sleep(0.2)
                 blocking_map = self.cd_detector.get_queued_skills_info(hwnd, skill_ids)
                 if not blocking_map:
                     return
             
-            time.sleep(0.8)
-            
-        if time.time() - start_wait >= timeout:
-            self.log("  ⚠️ 等待佇列超時，繼續執行")
+            time.sleep(0.5)
 
     def stop(self):
         """停止施放"""

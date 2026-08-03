@@ -1,0 +1,146 @@
+{
+  "mode": "independent",
+  "smart_mode": false,
+  "actions": [
+    {
+      "time": 1.2726943492889404,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 151,
+      "y": 360
+    },
+    {
+      "time": 2.709273338317871,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 165,
+      "y": 393
+    },
+    {
+      "time": 4.099467039108276,
+      "window_title": "5.補千影",
+      "type": "click",
+      "x": 145,
+      "y": 358
+    },
+    {
+      "time": 7.50411319732666,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 274,
+      "y": 228
+    },
+    {
+      "time": 7.657226800918579,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 274,
+      "y": 228
+    },
+    {
+      "time": 8.932745456695557,
+      "window_title": "5.補千影",
+      "type": "click",
+      "x": 269,
+      "y": 362
+    },
+    {
+      "time": 10.567354679107666,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 253,
+      "y": 536
+    },
+    {
+      "time": 12.335902452468872,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 203,
+      "y": 541
+    },
+    {
+      "time": 14.017391920089722,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 139,
+      "y": 480
+    },
+    {
+      "time": 15.619361162185669,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 88,
+      "y": 474
+    },
+    {
+      "time": 38.03236150741577,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 149,
+      "y": 477
+    },
+    {
+      "time": 39.96701908111572,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 306,
+      "y": 543
+    },
+    {
+      "time": 45.70697617530823,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 142,
+      "y": 540
+    },
+    {
+      "time": 47.30917000770569,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 90,
+      "y": 475
+    },
+    {
+      "time": 48.558234453201294,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 147,
+      "y": 473
+    },
+    {
+      "time": 61.642526626586914,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 93,
+      "y": 480
+    },
+    {
+      "time": 63.24045968055725,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 37,
+      "y": 478
+    },
+    {
+      "time": 68.642526626586914,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 93,
+      "y": 480
+    },
+    {
+      "time": 82.61899638175964,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 183,
+      "y": 344
+    },
+    {
+      "time": 83.90690612792969,
+      "window_title": "4.坦千影",
+      "type": "click",
+      "x": 162,
+      "y": 336
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "mode": "sync",
+  "smart_mode": false,
+  "actions": [
+    {
+      "time": 1.275216817855835,
+      "window_title": null,
+      "type": "click",
+      "x": 148,
+      "y": 342
+    },
+    {
+      "time": 2.400970458984375,
+      "window_title": null,
+      "type": "click",
+      "x": 170,
+      "y": 401
+    },
+    {
+      "time": 3.2735207080841064,
+      "window_title": null,
+      "type": "click",
+      "x": 172,
+      "y": 358
+    },
+    {
+      "time": 6.054198741912842,
+      "window_title": null,
+      "type": "click",
+      "x": 282,
+      "y": 318
+    },
+    {
+      "time": 6.217731475830078,
+      "window_title": null,
+      "type": "click",
+      "x": 282,
+      "y": 318
+    },
+    {
+      "time": 8.105250835418701,
+      "window_title": null,
+      "type": "click",
+      "x": 261,
+      "y": 537
+    },
+    {
+      "time": 9.439625263214111,
+      "window_title": null,
+      "type": "click",
+      "x": 139,
+      "y": 542
+    },
+    {
+      "time": 10.11441707611084,
+      "window_title": null,
+      "type": "click",
+      "x": 87,
+      "y": 544
+    },
+    {
+      "time": 10.9816575050354,
+      "window_title": null,
+      "type": "click",
+      "x": 34,
+      "y": 535
+    },
+    {
+      "time": 11.797888994216919,
+      "window_title": null,
+      "type": "click",
+      "x": 40,
+      "y": 478
+    },
+    {
+      "time": 39.01498103141785,
+      "window_title": null,
+      "type": "click",
+      "x": 179,
+      "y": 342
+    },
+    {
+      "time": 52.627257108688354,
+      "window_title": null,
+      "type": "click",
+      "x": 162,
+      "y": 333
+    }
+  ]
+}

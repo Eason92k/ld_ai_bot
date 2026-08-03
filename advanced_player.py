@@ -8,7 +8,7 @@ from ld_controller import (
     send_click, send_swipe, send_key, get_window_screenshot, find_sub_window
 )
 from battle_detector import (
-    is_in_battle, get_battle_state, wait_for_battle_start, wait_for_battle_end, debug_snapshot
+    is_in_battle, is_in_any_battle, get_battle_state, wait_for_battle_start, wait_for_battle_end, debug_snapshot
 )
 from skill_preset import SkillPresetParser, load_preset
 
@@ -223,42 +223,21 @@ class AdvancedActionPlayer:
                     break
                 time.sleep(3)
 
-        # ── 偵測戰鬥：判定是否有計時器，若無則執行跳轉 ───────────────
-        elif action_type == "detect_battle":
-            duration     = params.get('duration', 2.0)
-            jump_val     = params.get('jump_value', 0)
-            mode         = params.get('mode', 'relative')
-
-            if target_hwnds:
-                main_hwnd = target_hwnds[0]
-                # 使用 get_battle_state 取得具體類別
-                state = get_battle_state(main_hwnd)
-                
-                # 如果判定「不在戰鬥中」(包含 pre_battle 或 none)，就執行跳轉
-                if state not in ["in_battle_normal", "in_battle_rare"]:
-                    if mode == 'relative':
-                         target_idx = current_index + jump_val
-                    else:
-                        target_idx = jump_val - 1
-                    target_idx = max(0, min(target_idx, len(self.steps)))
-                    
-                    self.log(f"  ➜ 戰鬥判定：非戰鬥中 (狀態: {state}) -> 跳轉至步驟 {target_idx + 1}")
-                    return target_idx
-                else:
-                    status_text = "一般" if state == "in_battle_normal" else "稀有"
-                    self.log(f"    ✓ 戰鬥中({status_text})，繼續執行後續指令")
-
         # ── 等待進入戰鬥 ─────────────────────────────────────────────
         elif action_type == "wait_battle_start":
             # params 結構：
             #   timeout:       最長等候秒數（預設 60）
             #   poll_interval: 輪詢間隔（預設 0.5）
-            #   on_timeout_jump: 超時是否跳轉（True/False，預設 False）
-            #   jump_value:    超時時跳轉步數（相對）
+            #   jump_mode:     跳轉模式（'relative' / 'absolute' / 'none'，預設 'none'）
+            #   jump_value:    跳轉步數
             timeout       = params.get('timeout', 60)
             poll_interval = params.get('poll_interval', 0.5)
-            on_timeout_jump = params.get('on_timeout_jump', False)
+            jump_mode     = params.get('jump_mode', 'none')
             jump_val      = params.get('jump_value', 0)
+            
+            # 向下相容舊版 on_timeout_jump
+            if jump_mode == 'none' and params.get('on_timeout_jump', False):
+                jump_mode = 'relative'
 
             if target_hwnds:
                 self.log(f"  ➜ 等待進入戰鬥（最多 {timeout}s）...")
@@ -266,11 +245,16 @@ class AdvancedActionPlayer:
                     target_hwnds[0],
                     timeout=timeout,
                     poll_interval=poll_interval,
-                    log_fn=self.log
+                    log_fn=self.log,
+                    cancel_check=lambda: not self.playing
                 )
-                if not success and on_timeout_jump and jump_val != 0:
-                    target_idx = max(0, min(current_index + jump_val, len(self.steps)))
-                    self.log(f"    ⏱ 超時跳轉至步驟 {target_idx + 1}")
+                if not success and jump_mode != 'none' and jump_val != 0:
+                    if jump_mode == 'relative':
+                        target_idx = current_index + jump_val
+                    else:
+                        target_idx = jump_val - 1
+                    target_idx = max(0, min(target_idx, len(self.steps)))
+                    self.log(f"    ⏱ 未進入戰鬥，跳轉至步驟 {target_idx + 1}")
                     return target_idx
 
         # ── 等待戰鬥結束 ─────────────────────────────────────────────
@@ -291,7 +275,8 @@ class AdvancedActionPlayer:
                     target_hwnds[0],
                     timeout=timeout,
                     poll_interval=poll_interval,
-                    log_fn=self.log
+                    log_fn=self.log,
+                    cancel_check=lambda: not self.playing
                 )
                 if not success and on_timeout_jump and jump_val != 0:
                     target_idx = max(0, min(current_index + jump_val, len(self.steps)))
@@ -326,6 +311,8 @@ class AdvancedActionPlayer:
                     self.log(f"    × 預設檔中找不到套組: {set_name}")
                     return None
                 
+                auto_cycle = params.get('auto_cycle', True)
+                
                 # 執行技能 (skill_player.play 會在戰鬥結束後自動停止)
                 # 這裡需要同步執行，所以直接呼叫
                 # 先更新座標與設定
@@ -334,7 +321,7 @@ class AdvancedActionPlayer:
                 self.skill_player.cast_interval = data.get("cast_interval", 0.3)
                 
                 # 執行一輪直到戰鬥結束
-                self.skill_player.play(target_windows, preset)
+                self.skill_player.play(target_windows, preset, auto_cycle=auto_cycle)
                 self.log(f"    ✓ 預設技能執行完畢（戰鬥結束或手動停止）")
 
         return None
